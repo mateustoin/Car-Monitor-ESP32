@@ -1,0 +1,20 @@
+#include <stdlib.h>
+#include "unity.h"
+
+void setUp(void) {}
+void tearDown(void) {}
+
+static void test_sanity(void)
+{
+    TEST_ASSERT_EQUAL(1, 1);
+}
+
+/* Cada test_<x>.c expõe run_<x>_tests(); declare e chame aqui.
+   No alvo linux o ponto de entrada é app_main (simulador FreeRTOS). */
+
+void app_main(void)
+{
+    UNITY_BEGIN();
+    RUN_TEST(test_sanity);
+    exit(UNITY_END());
+}
