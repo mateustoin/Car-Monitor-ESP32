@@ -14,6 +14,7 @@ void run_gear_engine_tests(void);
 void run_obd_poller_tests(void);
 void run_storage_tests(void);
 void run_ui_logic_tests(void);
+void run_power_tests(void);
 
 static void test_sanity(void)
 {
@@ -37,5 +38,6 @@ void app_main(void)
     run_obd_poller_tests();
     run_storage_tests();
     run_ui_logic_tests();
+    run_power_tests();
     exit(UNITY_END());
 }
