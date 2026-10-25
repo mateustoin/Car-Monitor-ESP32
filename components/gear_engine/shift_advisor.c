@@ -34,13 +34,17 @@ shift_advice_t shift_advise(const vehicle_profile_t *p, const float *ratios, uin
 
     if (gear > 1 && in->rpm < (float)p->lug_rpm && in->load_pct >= (float)p->lug_load_pct
         && !throttle_closed(in)) {
-        uint8_t best = gear - 1;
+        uint8_t best = 0;
         for (int k = gear - 1; k >= 1; k--) { /* da maior para a menor: a primeira que serve */
             float pred = in->rpm * ratios[gear - 1] / ratios[k - 1];
             if (pred >= (float)p->target_band_low && pred <= (float)p->redline_rpm) {
                 best = (uint8_t)k;
                 break;
             }
+        }
+        if (best == 0) { /* nenhuma na faixa: gear-1, salvo se estourar a rotação máxima */
+            best = gear - 1;
+            if (in->rpm * ratios[gear - 1] / ratios[best - 1] > (float)p->redline_rpm) return SHIFT_NONE;
         }
         *target = best;
         return SHIFT_DOWN;

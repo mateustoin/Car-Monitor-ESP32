@@ -116,6 +116,31 @@ static void test_six_gear_profile(void)
     TEST_ASSERT_EQUAL_UINT8(6, s.learned_gears);
 }
 
+static void check_invalid_learned(const float *bad)
+{
+    gear_engine_t g;
+    float out[VP_MAX_GEARS];
+    uint32_t t = 0;
+    gear_engine_init(&g, vp_find("generic_man"), bad);
+    /* 3ª a 2200 RPM / 44 km/h: com relações válidas daria UP */
+    gear_state_t s = feed(&g, &t, 2200, 44, 15, 1000);
+    TEST_ASSERT_TRUE(s.learning);
+    TEST_ASSERT_EQUAL_UINT8(0, s.learned_gears);
+    TEST_ASSERT_EQUAL(SHIFT_NONE, s.advice);
+    TEST_ASSERT_EQUAL_UINT8(0, s.target_gear);
+    TEST_ASSERT_FALSE(gear_engine_take_learned(&g, out));
+}
+
+static void test_invalid_learned_is_ignored(void)
+{
+    const float with_zero[5] = {7.5f, 0.0f, 20.0f, 27.1f, 36.9f};
+    const float flat[5] = {7.5f, 13.6f, 13.6f, 27.1f, 36.9f};
+    const float with_nan[5] = {7.5f, NAN, 20.0f, 27.1f, 36.9f};
+    check_invalid_learned(with_zero);
+    check_invalid_learned(flat);
+    check_invalid_learned(with_nan);
+}
+
 void run_gear_engine_tests(void)
 {
     RUN_TEST(test_stale_clears);
@@ -124,4 +149,5 @@ void run_gear_engine_tests(void)
     RUN_TEST(test_preloaded_ratios_start_converged);
     RUN_TEST(test_reset_learning_returns_to_seeds);
     RUN_TEST(test_six_gear_profile);
+    RUN_TEST(test_invalid_learned_is_ignored);
 }

@@ -51,12 +51,21 @@ static void test_no_downshift_closed_by_load_fallback(void)
 {
     uint8_t t = 9;
     TEST_ASSERT_EQUAL(SHIFT_NONE, adv(5, 1200, 10, NAN, &t));
+    TEST_ASSERT_EQUAL_UINT8(0, t);
+}
+
+static void test_downshift_without_throttle_sensor(void)
+{
+    uint8_t t = 0;
+    TEST_ASSERT_EQUAL(SHIFT_DOWN, adv(5, 1200, 80, NAN, &t));
+    TEST_ASSERT_EQUAL_UINT8(3, t);
 }
 
 static void test_top_gear_no_up(void)
 {
     uint8_t t = 9;
     TEST_ASSERT_EQUAL(SHIFT_NONE, adv(5, 3000, 15, 20, &t));
+    TEST_ASSERT_EQUAL_UINT8(0, t);
 }
 
 static void test_no_advice_without_gear(void)
@@ -76,6 +85,16 @@ static void test_downshift_falls_back_to_previous_gear(void)
     TEST_ASSERT_EQUAL_UINT8(2, t);
 }
 
+static void test_no_downshift_above_redline(void)
+{
+    /* 1200 RPM na 2ª com 1ª muito curta: previsto 9600 > redline (6000) -> sem conselho */
+    static const float steep[2] = {10.0f, 80.0f};
+    gear_input_t in = {.rpm = 1200, .speed_kmh = 96, .load_pct = 80, .throttle_pct = 70};
+    uint8_t t = 9;
+    TEST_ASSERT_EQUAL(SHIFT_NONE, shift_advise(vp_default(), steep, 2, 2, &in, &t));
+    TEST_ASSERT_EQUAL_UINT8(0, t);
+}
+
 void run_shift_advisor_tests(void)
 {
     RUN_TEST(test_upshift_light_load);
@@ -84,6 +103,8 @@ void run_shift_advisor_tests(void)
     RUN_TEST(test_downshift_skips);
     RUN_TEST(test_no_downshift_throttle_closed);
     RUN_TEST(test_no_downshift_closed_by_load_fallback);
+    RUN_TEST(test_downshift_without_throttle_sensor);
+    RUN_TEST(test_no_downshift_above_redline);
     RUN_TEST(test_top_gear_no_up);
     RUN_TEST(test_no_advice_without_gear);
     RUN_TEST(test_downshift_falls_back_to_previous_gear);

@@ -39,13 +39,24 @@ static void clear_learner(gear_engine_t *g)
     g->last_ratio = 0;
 }
 
+/* Blob vindo do NVS não é confiável: exatamente p->gears valores finitos, > 0 e estritamente crescentes. */
+static bool learned_valid(const vehicle_profile_t *p, const float *learned)
+{
+    if (p->gears == 0 || p->gears > VP_MAX_GEARS) return false;
+    for (int i = 0; i < p->gears; i++) {
+        if (!isfinite(learned[i]) || !(learned[i] > 0)) return false;
+        if (i > 0 && !(learned[i] > learned[i - 1])) return false;
+    }
+    return true;
+}
+
 void gear_engine_init(gear_engine_t *g, const vehicle_profile_t *p, const float *learned)
 {
     memset(g, 0, sizeof(*g));
     g->profile = p;
     gear_detect_init(DETECT(g));
     clear_learner(g);
-    if (learned) {
+    if (learned && learned_valid(p, learned)) {
         g->n = p->gears > VP_MAX_GEARS ? VP_MAX_GEARS : p->gears;
         memcpy(g->ratios, learned, g->n * sizeof(float));
         g->converged = true;
@@ -88,7 +99,8 @@ gear_state_t gear_engine_update(gear_engine_t *g, const gear_input_t *in)
     const vehicle_profile_t *p = g->profile;
     gear_state_t s = {0};
     s.stale = (uint32_t)(in->now_ms - in->sample_ms) > p->stale_ms;
-    if (!s.stale) learn_step(g, in);
+    if (s.stale) g->last_ratio = 0;
+    else learn_step(g, in);
 
     float rpm = s.stale ? 0 : in->rpm, spd = s.stale ? 0 : in->speed_kmh;
     uint8_t gear = gear_detect_update(DETECT(g), g->ratios, g->n, rpm, spd,
