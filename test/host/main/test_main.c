@@ -7,6 +7,7 @@ void tearDown(void) {}
 void run_transport_tests(void);
 void run_elm327_tests(void);
 void run_vehicle_profile_tests(void);
+void run_gear_learn_tests(void);
 
 static void test_sanity(void)
 {
@@ -23,5 +24,6 @@ void app_main(void)
     run_transport_tests();
     run_elm327_tests();
     run_vehicle_profile_tests();
+    run_gear_learn_tests();
     exit(UNITY_END());
 }
