@@ -13,6 +13,7 @@ void run_shift_advisor_tests(void);
 void run_gear_engine_tests(void);
 void run_obd_poller_tests(void);
 void run_storage_tests(void);
+void run_ui_logic_tests(void);
 
 static void test_sanity(void)
 {
@@ -35,5 +36,6 @@ void app_main(void)
     run_gear_engine_tests();
     run_obd_poller_tests();
     run_storage_tests();
+    run_ui_logic_tests();
     exit(UNITY_END());
 }
