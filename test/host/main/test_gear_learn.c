@@ -11,12 +11,18 @@ static float rnd01(void)
     return (float)(s_rng >> 8) / (float)(1u << 24);
 }
 
+/* ruído uniforme de ±spread (fração) */
+static void feed_spread(gear_learn_t *l, float ratio, int n, float spread)
+{
+    for (int i = 0; i < n; i++) {
+        gear_learn_add(l, ratio * (1.0f + (rnd01() * 2.0f - 1.0f) * spread));
+    }
+}
+
 /* ruído uniforme de ±2% */
 static void feed(gear_learn_t *l, float ratio, int n)
 {
-    for (int i = 0; i < n; i++) {
-        gear_learn_add(l, ratio * (1.0f + (rnd01() * 2.0f - 1.0f) * 0.02f));
-    }
+    feed_spread(l, ratio, n, 0.02f);
 }
 
 static void check_close(const float *want, const float *got, int n)
@@ -116,6 +122,42 @@ static void test_more_clusters_than_gears_keeps_most_populated(void)
     TEST_ASSERT_FLOAT_WITHIN(0.9f, 30.0f, out[1]);
 }
 
+static void test_close_gears_10pct_apart(void)
+{
+    s_rng = 31337;
+    static const float g[4] = {20.0f, 22.0f, 24.2f, 26.6f};
+    gear_learn_t l;
+    float out[VP_MAX_GEARS];
+    gear_learn_init(&l, 4);
+    for (int i = 0; i < 4; i++) feed(&l, g[i], 300);
+    TEST_ASSERT_EQUAL_UINT8(4, gear_learn_result(&l, out));
+    check_close(g, out, 4);
+}
+
+static void test_wide_spread_5pct(void)
+{
+    s_rng = 2024;
+    gear_learn_t l;
+    float out[VP_MAX_GEARS];
+    gear_learn_init(&l, 5);
+    for (int g = 0; g < 5; g++) feed_spread(&l, FIVE[g], 300, 0.05f);
+    TEST_ASSERT_EQUAL_UINT8(5, gear_learn_result(&l, out));
+    check_close(FIVE, out, 5);
+}
+
+static void test_skewed_counts(void)
+{
+    s_rng = 808;
+    /* 5ª com 150 de ~2650 (>5%); uma com 2% seria rejeitada pela regra dos 5% */
+    static const int n[5] = {1200, 700, 400, 200, 150};
+    gear_learn_t l;
+    float out[VP_MAX_GEARS];
+    gear_learn_init(&l, 5);
+    for (int g = 0; g < 5; g++) feed(&l, FIVE[g], n[g]);
+    TEST_ASSERT_EQUAL_UINT8(5, gear_learn_result(&l, out));
+    check_close(FIVE, out, 5);
+}
+
 void run_gear_learn_tests(void)
 {
     RUN_TEST(test_learns_five);
@@ -125,4 +167,7 @@ void run_gear_learn_tests(void)
     RUN_TEST(test_too_few_samples);
     RUN_TEST(test_invalid_samples_ignored);
     RUN_TEST(test_more_clusters_than_gears_keeps_most_populated);
+    RUN_TEST(test_close_gears_10pct_apart);
+    RUN_TEST(test_wide_spread_5pct);
+    RUN_TEST(test_skewed_counts);
 }

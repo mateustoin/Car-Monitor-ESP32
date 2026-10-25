@@ -4,10 +4,11 @@
 
 /* Histograma com bins logarítmicos de ~2% a partir de RATIO_MIN. */
 #define RATIO_MIN       2.0f
-#define RATIO_SANE_MAX  200.0f
 #define BIN_GROWTH      1.02f
-#define PEAK_HALF       2    /* janela de pico: ±2 bins (~±4%) */
-#define CLUSTER_HALF    4    /* região do cluster e supressão: ±4 bins (~8%) */
+#define PEAK_HALF       1    /* janela de busca do pico: ±1 bin */
+#define REGION_HALF     2    /* pico e região do cluster: ±2 bins (~±4%) */
+#define MERGE_RATIO     1.08f /* centros a menos de 8% são fundidos */
+#define CAND_MIN_SAMPLES 5   /* candidatos pequenos só viram ruído de cauda */
 #define MIN_SAMPLES     40
 #define MIN_FRACTION_PC 5    /* % do total */
 #define MAX_CLUSTERS    16
@@ -20,7 +21,7 @@ void gear_learn_init(gear_learn_t *l, uint8_t gears)
 
 void gear_learn_add(gear_learn_t *l, float ratio)
 {
-    if (!(ratio >= RATIO_MIN) || ratio > RATIO_SANE_MAX) return; /* cobre NaN, <=0 */
+    if (!(ratio >= RATIO_MIN)) return; /* cobre NaN, <=0; o topo é limitado pelos bins */
     /* Sem logf/powf (libm não é linkada em todos os alvos): varre as bordas. */
     int bin = 0;
     float edge = RATIO_MIN * BIN_GROWTH;
@@ -46,19 +47,45 @@ static uint32_t window_mass(const uint32_t *c, int center, int half)
     return m;
 }
 
+/* Funde, em ordem, centros a menos de 8% um do outro (média ponderada). */
+static int merge_close(float *val, uint32_t *mass, int n)
+{
+    bool again = true;
+    while (again) {
+        again = false;
+        for (int i = 0; i < n && !again; i++) {
+            for (int j = i + 1; j < n && !again; j++) {
+                float lo = val[i] < val[j] ? val[i] : val[j];
+                float hi = val[i] < val[j] ? val[j] : val[i];
+                if (hi < lo * MERGE_RATIO) {
+                    uint32_t m = mass[i] + mass[j];
+                    val[i] = (val[i] * (float)mass[i] + val[j] * (float)mass[j]) / (float)m;
+                    mass[i] = m;
+                    val[j] = val[n - 1];
+                    mass[j] = mass[n - 1];
+                    n--;
+                    again = true;
+                }
+            }
+        }
+    }
+    return n;
+}
+
 uint8_t gear_learn_result(const gear_learn_t *l, float out[VP_MAX_GEARS])
 {
     uint32_t work[GEAR_LEARN_BINS];
     float val[MAX_CLUSTERS];
+    uint32_t mass[MAX_CLUSTERS];
     int n = 0;
     int limit = l->gears < VP_MAX_GEARS ? l->gears : VP_MAX_GEARS;
-    if (limit > MAX_CLUSTERS) limit = MAX_CLUSTERS;
 
     memcpy(work, l->counts, sizeof(work));
 
-    /* Extrai clusters do mais populoso para o menos; clusters a menos de ~8%
-       ficam fundidos porque a região suprimida os absorve. */
-    while (n < limit) {
+    /* Extrai regiões estreitas (pico +-2 bins, ~+-4%) do mais populoso para o
+       menos; marchas a ~10% de distância não se contaminam. Caudas de clusters
+       largos viram candidatos próximos e são refundidos depois. */
+    while (n < MAX_CLUSTERS) {
         int peak = -1;
         uint32_t best = 0;
         for (int i = 0; i < GEAR_LEARN_BINS; i++) {
@@ -67,16 +94,54 @@ uint8_t gear_learn_result(const gear_learn_t *l, float out[VP_MAX_GEARS])
         }
         if (peak < 0) break;
 
-        uint32_t mass = window_mass(work, peak, CLUSTER_HALF);
-        if (mass < MIN_SAMPLES || mass * 100u < (uint32_t)MIN_FRACTION_PC * l->total) break;
+        /* Mean-shift: recentra a região na média local, para não ficar
+           entre dois clusters vizinhos. */
+        for (int it = 0; it < 4; it++) {
+            float ws = 0.0f, wm = 0.0f;
+            for (int i = peak - REGION_HALF; i <= peak + REGION_HALF; i++) {
+                if (i < 0 || i >= GEAR_LEARN_BINS) continue;
+                ws += (float)work[i] * (float)i;
+                wm += (float)work[i];
+            }
+            if (wm <= 0.0f) break;
+            int c = (int)(ws / wm + 0.5f);
+            if (c == peak) break;
+            peak = c;
+        }
+        best = window_mass(work, peak, REGION_HALF);
+        if (best < CAND_MIN_SAMPLES) break;
 
         float sum = 0.0f;
-        for (int i = peak - CLUSTER_HALF; i <= peak + CLUSTER_HALF; i++) {
+        for (int i = peak - REGION_HALF; i <= peak + REGION_HALF; i++) {
             if (i < 0 || i >= GEAR_LEARN_BINS) continue;
             sum += (float)work[i] * bin_center(i);
             work[i] = 0;
         }
-        val[n++] = sum / (float)mass;
+        val[n] = sum / (float)best;
+        mass[n] = best;
+        n++;
+    }
+
+    n = merge_close(val, mass, n);
+
+    /* Confiável: >= 40 amostras e >= 5% do total (após a fusão). */
+    int k = 0;
+    for (int i = 0; i < n; i++) {
+        if (mass[i] >= MIN_SAMPLES && mass[i] * 100u >= (uint32_t)MIN_FRACTION_PC * l->total) {
+            val[k] = val[i];
+            mass[k] = mass[i];
+            k++;
+        }
+    }
+    n = k;
+
+    /* Mantém os `limit` mais populosos. */
+    while (n > limit) {
+        int w = 0;
+        for (int i = 1; i < n; i++) if (mass[i] < mass[w]) w = i;
+        val[w] = val[n - 1];
+        mass[w] = mass[n - 1];
+        n--;
     }
 
     /* Ordem crescente (inserção): out[0] = 1ª marcha. */

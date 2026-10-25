@@ -14,7 +14,7 @@ typedef struct {
 } gear_learn_t;
 
 void    gear_learn_init(gear_learn_t *l, uint8_t gears);
-/* Só amostras já filtradas como estáveis. Valores <= 0, NaN ou > 200 são ignorados. */
+/* Só amostras já filtradas como estáveis. Valores <= 0, NaN, < 2 ou acima de ~86 (fim dos bins) são ignorados. */
 void    gear_learn_add(gear_learn_t *l, float ratio);
 /* Devolve o nº de clusters confiáveis (limitado a `gears`), gravados em out[]
    em ordem crescente de relação (out[0] = 1ª marcha). Se houver mais clusters
