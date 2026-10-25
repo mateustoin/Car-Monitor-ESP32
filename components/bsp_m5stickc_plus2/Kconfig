@@ -1,0 +1,35 @@
+menu "M5StickC Plus2"
+    depends on BOARD_M5STICKC_PLUS2
+
+    # Valores de memória: conferir no esquemático M5Stack.
+    config BSP_PLUS2_LCD_GAP_X
+        int "Deslocamento X do LCD em paisagem (gap)"
+        range 0 80
+        default 40
+
+    config BSP_PLUS2_LCD_GAP_Y
+        int "Deslocamento Y do LCD em paisagem (gap)"
+        range 0 80
+        default 53
+
+    config BSP_PLUS2_LCD_INVERT
+        bool "Inverter cores do LCD"
+        default y
+
+    config BSP_PLUS2_LCD_SWAP_XY
+        bool "Trocar X/Y (paisagem)"
+        default y
+
+    config BSP_PLUS2_LCD_MIRROR_X
+        bool "Espelhar X"
+        default y
+
+    config BSP_PLUS2_LCD_MIRROR_Y
+        bool "Espelhar Y"
+        default n
+
+    config BSP_PLUS2_LCD_BGR
+        bool "Ordem de cores BGR (em vez de RGB)"
+        default n
+
+endmenu

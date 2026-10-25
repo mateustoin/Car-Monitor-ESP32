@@ -1,0 +1,8 @@
+dependencies:
+  # board_display() devolve lv_display_t*, então o header público expõe o lvgl.
+  # Fora do alvo linux: os testes no host (test/host) varrem components/ e não usam LVGL.
+  lvgl/lvgl:
+    version: "9.3.0"
+    require: public
+    rules:
+      - if: "target != linux"

@@ -1,0 +1,18 @@
+menu "Placa"
+
+    choice BOARD
+        prompt "Placa (BSP)"
+        default BOARD_M5STICKC_PLUS2 if IDF_TARGET_ESP32
+        default BOARD_HEADLESS
+        help
+            Escolhe o BSP que implementa board_api.h.
+
+        config BOARD_M5STICKC_PLUS2
+            bool "M5StickC Plus2 (LCD ST7789, buzzer, 3 botões)"
+            depends on IDF_TARGET_ESP32
+
+        config BOARD_HEADLESS
+            bool "Headless (sem tela, sem buzzer; só log)"
+    endchoice
+
+endmenu
