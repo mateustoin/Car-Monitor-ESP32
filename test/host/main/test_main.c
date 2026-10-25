@@ -4,6 +4,8 @@
 void setUp(void) {}
 void tearDown(void) {}
 
+void run_transport_tests(void);
+
 static void test_sanity(void)
 {
     TEST_ASSERT_EQUAL(1, 1);
@@ -16,5 +18,6 @@ void app_main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_sanity);
+    run_transport_tests();
     exit(UNITY_END());
 }
