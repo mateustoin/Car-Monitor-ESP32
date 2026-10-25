@@ -2,7 +2,7 @@
 
 Ideias para etapas futuras. Status: `[ ]` pendente · `[x]` aprovada (mover para o roadmap no design) · ~~riscado~~ descartada.
 
-Cada ideia tem status **pendente**, que o Mateus muda para *aprovada* ou *descartada*, e a origem. As aprovadas entram nas etapas do roadmap acima.
+As aprovadas entram nas etapas do roadmap em `docs/superpowers/specs/2026-10-25-assistente-marchas-design.md`.
 
 Origem: **[B]** = brainstorm desta conversa · **[M]** = inspirada em produto de mercado · **[N]** = ideia nova surgida da pesquisa.
 
