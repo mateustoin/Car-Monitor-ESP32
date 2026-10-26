@@ -129,6 +129,9 @@ Use um terminal separado para isso: o PATH alterado não serve para compilar o f
 
 ## Checklist no carro
 
+Passo a passo do teste (conexão, log, gravação com ou sem notebook e exportação):
+[docs/guia-teste-no-carro.md](docs/guia-teste-no-carro.md).
+
 Ainda não validado no carro. Na primeira saída, conferir:
 
 1. **Conexão:** celular desconectado do ELM; ligar a ignição; o aparelho mostra
