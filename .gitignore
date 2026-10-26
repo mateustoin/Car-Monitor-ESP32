@@ -1,0 +1,6 @@
+.superpowers/
+build/
+**/build/
+managed_components/
+sdkconfig
+sdkconfig.old

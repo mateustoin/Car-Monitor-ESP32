@@ -1,0 +1,6 @@
+dependencies:
+  # O lvgl/lvgl (fixado) vem público pelo board_api. Fora do alvo linux (testes no host).
+  espressif/esp_lvgl_port:
+    version: "^2"
+    rules:
+      - if: "target != linux"
