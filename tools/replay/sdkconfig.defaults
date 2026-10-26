@@ -1,0 +1,2 @@
+# Replay no host: nenhuma configuração especial além do alvo linux.
+CONFIG_IDF_TARGET="linux"

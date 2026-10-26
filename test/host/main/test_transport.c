@@ -90,6 +90,24 @@ static void test_replay_clock(void)
     t->ops->destroy(t);
 }
 
+static void test_replay_eof(void)
+{
+    obd_transport_t *t;
+    char resp[32];
+    TEST_ASSERT_EQUAL(ESP_OK, transport_replay_create(
+        "100\t010C\t410C0000\n500\t010D\t410D10\n", 0, &t));
+    t->ops->connect(t, 100);
+    TEST_ASSERT_FALSE(transport_replay_eof(t));
+    obd_transport_command(t, "010C", resp, sizeof(resp), 1000);
+    TEST_ASSERT_FALSE(transport_replay_eof(t));
+    obd_transport_command(t, "010D", resp, sizeof(resp), 1000);
+    TEST_ASSERT_TRUE(transport_replay_eof(t));
+    t->ops->destroy(t);
+    TEST_ASSERT_EQUAL(ESP_OK, transport_replay_create("", 0, &t));
+    TEST_ASSERT_TRUE(transport_replay_eof(t));
+    t->ops->destroy(t);
+}
+
 void run_transport_tests(void)
 {
     RUN_TEST(test_rec_roundtrip);
@@ -99,4 +117,5 @@ void run_transport_tests(void)
     RUN_TEST(test_command_disconnected);
     RUN_TEST(test_replay_unknown_cmd);
     RUN_TEST(test_replay_clock);
+    RUN_TEST(test_replay_eof);
 }

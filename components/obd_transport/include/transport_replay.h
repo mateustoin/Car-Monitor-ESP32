@@ -8,3 +8,6 @@ esp_err_t transport_replay_create(const char *recording, size_t chunk, obd_trans
 
 /* Timestamp (ms) do último registro entregue. */
 uint32_t transport_replay_now_ms(obd_transport_t *t);
+
+/* true quando o cursor passou do último registro (nada mais a entregar). */
+bool transport_replay_eof(obd_transport_t *t);

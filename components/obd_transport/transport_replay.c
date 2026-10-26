@@ -114,3 +114,22 @@ uint32_t transport_replay_now_ms(obd_transport_t *t)
 {
     return ((replay_t *)t->ctx)->now_ms;
 }
+
+bool transport_replay_eof(obd_transport_t *t)
+{
+    replay_t *r = t->ctx;
+    size_t pos = r->cursor;
+    while (r->rec[pos]) {
+        const char *eol = strchr(r->rec + pos, '\n');
+        size_t ll = eol ? (size_t)(eol - (r->rec + pos)) : strlen(r->rec + pos);
+        if (ll > 0 && ll < REPLAY_LINE_MAX) {
+            char line[REPLAY_LINE_MAX], rcmd[REPLAY_CMD_MAX], resp[REPLAY_RESP_MAX];
+            uint32_t ts;
+            memcpy(line, r->rec + pos, ll);
+            line[ll] = '\0';
+            if (rec_parse_line(line, &ts, rcmd, sizeof(rcmd), resp, sizeof(resp))) return false;
+        }
+        pos += ll + (eol ? 1 : 0);
+    }
+    return true;
+}
