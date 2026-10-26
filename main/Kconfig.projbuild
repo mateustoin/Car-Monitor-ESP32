@@ -1,0 +1,18 @@
+menu "Car Monitor (app)"
+
+    config APP_PROFILE_ID
+        string "Perfil de veículo padrão"
+        default "sandero_k7m"
+        help
+            Id do perfil (components/vehicle_profile/profiles). Um perfil gravado no NVS
+            (storage_set_profile_id) tem prioridade; id desconhecido cai no perfil padrão.
+
+    config APP_POWER_IDLE_MS_OVERRIDE
+        int "Ociosidade até o sono profundo, em ms (0 = padrão de 5 min)"
+        range 0 3600000
+        default 0
+        help
+            debug: encurta o tempo ocioso (motor parado e ELM sem dados) antes de dormir,
+            para testar o sono profundo sem esperar 5 min. Deixe 0 no uso normal.
+
+endmenu
