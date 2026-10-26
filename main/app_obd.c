@@ -24,6 +24,11 @@
 #define BACKOFF_MIN_MS      2000
 #define BACKOFF_MAX_MS      30000
 #define INIT_CACHE_LINES    12      /* ATZ..ATSP0, 0100, ATDPN, 0120, 0140 e folga */
+#if CONFIG_OBD_POLL_EXTENDED
+#define POLL_EXTENDED       true    /* MAP/IAT na agenda (gravação da Etapa 2) */
+#else
+#define POLL_EXTENDED       false
+#endif
 
 static const char *TAG = "app_obd";
 
@@ -143,7 +148,7 @@ static void publish_battery(float v)
 static esp_err_t run_session(obd_transport_t *t, elm327_t *elm)
 {
     static obd_poller_t poller;
-    obd_poller_init(&poller, pid_supported, elm);
+    obd_poller_init(&poller, pid_supported, elm, POLL_EXTENDED);
     publish_session(elm, &poller);
     uint32_t last_atrv = app_now_ms() - ATRV_PERIOD_MS;   /* primeira leitura já */
     bool atrv_warned = false;

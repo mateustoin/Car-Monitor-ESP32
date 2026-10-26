@@ -132,9 +132,11 @@ static void step_engine(ui_ctx_t *c, const app_obd_status_t *st, uint32_t now)
         c->have_gs = false;
         return;
     }
+    /* R34: stale e hold acompanham a taxa medida do ELM. */
+    gear_engine_set_poll_cycle(&s_engine, s->fast_cycle_ms);
     uint32_t sample_ms = s->rpm.t_ms < s->speed_kmh.t_ms ? s->rpm.t_ms : s->speed_kmh.t_ms;
     bool fresh = !c->have_gs || s->rpm.t_ms != c->last_rpm_t || s->speed_kmh.t_ms != c->last_spd_t;
-    bool stale = (uint32_t)(now - sample_ms) > s_profile->stale_ms;
+    bool stale = gear_sample_is_stale(now, sample_ms, gear_engine_stale_ms(&s_engine));
     if (!fresh && !stale) return;
 
     gear_input_t in = {
@@ -170,10 +172,11 @@ static const char *status_text(app_obd_state_t s)
     return "-";
 }
 
-/* Valor só se conectado e com amostra recente; senão NAN (nada da sessão anterior). */
+/* Valor só se conectado e com amostra recente (mesma regra de stale do gear_engine);
+   senão NAN (nada da sessão anterior). */
 static float live_value(const app_obd_status_t *st, const obd_value_t *v, uint32_t now)
 {
-    if (!st->connected || !v->valid || (uint32_t)(now - v->t_ms) > s_profile->stale_ms) return NAN;
+    if (!st->connected || !v->valid || gear_sample_is_stale(now, v->t_ms, gear_engine_stale_ms(&s_engine))) return NAN;
     return v->value;
 }
 

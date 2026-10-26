@@ -16,6 +16,7 @@ void run_storage_tests(void);
 void run_ui_logic_tests(void);
 void run_power_tests(void);
 void run_rec_files_tests(void);
+void run_rate_model_tests(void);
 
 static void test_sanity(void)
 {
@@ -41,5 +42,6 @@ void app_main(void)
     run_ui_logic_tests();
     run_power_tests();
     run_rec_files_tests();
+    run_rate_model_tests();
     exit(UNITY_END());
 }

@@ -83,7 +83,7 @@ int main(int argc, char **argv)
     elm327_t elm;
     if (elm327_init(&elm, t, 1000) != ESP_OK) { fprintf(stderr, "elm327_init falhou\n"); return 1; }
     obd_poller_t poller;
-    obd_poller_init(&poller, supported, &elm);
+    obd_poller_init(&poller, supported, &elm, false);
     gear_engine_t g;
     gear_engine_init(&g, prof, seeds_arg ? seeds : NULL);
 
@@ -97,7 +97,7 @@ int main(int argc, char **argv)
         float v = 0;
         esp_err_t err = elm327_read_pid(&elm, pid, &v);
         now = transport_replay_now_ms(t);
-        if (now - prev_now > prof->stale_ms)
+        if (now - prev_now > gear_engine_stale_ms(&g))
             fprintf(stderr, "aviso: relógio saltou %u ms (registros pulados na gravação?) em t=%u\n",
                     (unsigned)(now - prev_now), (unsigned)now);
         prev_now = now;
@@ -105,6 +105,7 @@ int main(int argc, char **argv)
         obd_poller_record(&poller, pid, v, err == ESP_OK, now);
 
         const obd_snapshot_t *s = obd_poller_snapshot(&poller);
+        gear_engine_set_poll_cycle(&g, s->fast_cycle_ms);   /* como no app (R34) */
         if (!s->rpm.valid || !s->speed_kmh.valid) continue;
         if (s->rpm.t_ms == last_rpm_t && s->speed_kmh.t_ms == last_spd_t) continue;
         last_rpm_t = s->rpm.t_ms;

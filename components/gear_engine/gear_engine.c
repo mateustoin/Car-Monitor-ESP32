@@ -20,6 +20,9 @@ _Static_assert(_Alignof(gear_detect_t) <= _Alignof(uint32_t), "alinhamento detec
 #define STABLE_MAX_RATIO_JUMP 0.03f
 /* Repouso do acelerador (R30): algumas ECUs leem 0x11 > 0 com o pé fora. */
 #define THROTTLE_REST_MAX    25.0f
+/* R34: com ELM lento o ciclo rápido passa do stale/hold do perfil. */
+#define STALE_CYCLES_X10     25u   /* stale >= 2,5 ciclos */
+#define HOLD_CYCLES          2u    /* hold >= 2 ciclos */
 /* gear_learn_converged refaz o clustering a cada chamada: só checa a cada N amostras estáveis */
 #define CHECK_EVERY 20
 
@@ -60,6 +63,8 @@ void gear_engine_init(gear_engine_t *g, const vehicle_profile_t *p, const float 
     memset(g, 0, sizeof(*g));
     g->profile = p;
     g->throttle_rest = NAN;
+    g->stale_ms = p->stale_ms;
+    g->hold_ms = p->gear_hold_ms;
     gear_detect_init(DETECT(g));
     shift_hyst_reset(ADVICE(g));
     clear_learner(g);
@@ -121,7 +126,7 @@ gear_state_t gear_engine_update(gear_engine_t *g, const gear_input_t *in)
 {
     const vehicle_profile_t *p = g->profile;
     gear_state_t s = {0};
-    s.stale = (uint32_t)(in->now_ms - in->sample_ms) > p->stale_ms;
+    s.stale = gear_sample_is_stale(in->now_ms, in->sample_ms, g->stale_ms);
     if (s.stale) {
         g->last_ratio = 0;
     } else {
@@ -131,7 +136,7 @@ gear_state_t gear_engine_update(gear_engine_t *g, const gear_input_t *in)
 
     float rpm = s.stale ? 0 : in->rpm, spd = s.stale ? 0 : in->speed_kmh;
     uint8_t gear = gear_detect_update(DETECT(g), g->ratios, g->n, rpm, spd,
-                                      p->ratio_tolerance, p->gear_hold_ms, in->now_ms);
+                                      p->ratio_tolerance, (uint16_t)g->hold_ms, in->now_ms);
     s.learning = !g->converged;
     s.learned_gears = (s.learning && g->learner_count > g->n) ? g->learner_count : g->n;
     if (s.stale) { /* gear 0, NONE */
@@ -163,3 +168,17 @@ void gear_engine_reset_learning(gear_engine_t *g)
     g->learned_pending = false;
     use_seeds(g);
 }
+
+void gear_engine_set_poll_cycle(gear_engine_t *g, uint32_t cycle_ms)
+{
+    const vehicle_profile_t *p = g->profile;
+    uint64_t stale = (uint64_t)cycle_ms * STALE_CYCLES_X10 / 10u;
+    uint64_t hold = (uint64_t)cycle_ms * HOLD_CYCLES;
+    if (hold > UINT16_MAX) hold = UINT16_MAX;   /* gear_detect recebe uint16 */
+    if (stale > UINT16_MAX) stale = UINT16_MAX;
+    g->stale_ms = stale > p->stale_ms ? (uint32_t)stale : p->stale_ms;
+    g->hold_ms = hold > p->gear_hold_ms ? (uint32_t)hold : p->gear_hold_ms;
+}
+
+uint32_t gear_engine_stale_ms(const gear_engine_t *g) { return g->stale_ms; }
+uint32_t gear_engine_hold_ms(const gear_engine_t *g) { return g->hold_ms; }

@@ -1,0 +1,13 @@
+menu "OBD poller"
+
+    config OBD_POLL_EXTENDED
+        bool "Gravação estendida: pedir também MAP (0x0B) e IAT (0x0F)"
+        default n
+        help
+            Agenda MAP e IAT como itens lentos (1 s), para gravar dados da Etapa 2
+            (consumo por speed-density). Desligado por padrão: num ELM lento ou em
+            K-line cada pedido extra alonga o ciclo de RPM/velocidade de que a marcha
+            depende. O componente obd_poller não lê o Kconfig; o app passa a opção
+            para obd_poller_init.
+
+endmenu

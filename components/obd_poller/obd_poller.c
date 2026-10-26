@@ -19,7 +19,7 @@ static void add_item(obd_poller_t *p, uint8_t pid, uint32_t period_ms)
     p->n_items++;
 }
 
-void obd_poller_init(obd_poller_t *p, obd_supported_fn supported, void *arg)
+void obd_poller_init(obd_poller_t *p, obd_supported_fn supported, void *arg, bool extended)
 {
     *p = (obd_poller_t){0};
     bool has_load = is_supported(supported, arg, ELM_PID_LOAD);
@@ -32,10 +32,13 @@ void obd_poller_init(obd_poller_t *p, obd_supported_fn supported, void *arg)
     if (has_thr) add_item(p, ELM_PID_THROTTLE, 0);  /* uma vez só, mesmo sendo fonte de carga */
 
     if (is_supported(supported, arg, ELM_PID_COOLANT)) add_item(p, ELM_PID_COOLANT, SLOW_COOLANT_MS);
-    if (is_supported(supported, arg, ELM_PID_MAP)) add_item(p, ELM_PID_MAP, SLOW_MS);
-    if (is_supported(supported, arg, ELM_PID_IAT)) add_item(p, ELM_PID_IAT, SLOW_MS);
+    /* MAP/IAT só para a gravação estendida (Etapa 2): num ELM lento, cada pedido extra
+       alonga o ciclo rápido de que a marcha depende. */
+    if (extended && is_supported(supported, arg, ELM_PID_MAP)) add_item(p, ELM_PID_MAP, SLOW_MS);
+    if (extended && is_supported(supported, arg, ELM_PID_IAT)) add_item(p, ELM_PID_IAT, SLOW_MS);
 
     p->snap.load_source_pid = has_load ? ELM_PID_LOAD : (has_thr ? ELM_PID_THROTTLE : 0);
+    for (uint8_t i = 0; i < p->n_items; i++) if (p->items[i].period_ms == 0) p->n_fast++;
 }
 
 uint8_t obd_poller_next(obd_poller_t *p, uint32_t now_ms)
@@ -103,6 +106,7 @@ void obd_poller_record(obd_poller_t *p, uint8_t pid, float value, bool ok, uint3
         if (dt > 0) {
             float inst = 1000.0f / (float)dt;
             s->rate_hz = (s->rate_hz == 0.0f) ? inst : s->rate_hz + RATE_ALPHA * (inst - s->rate_hz);
+            s->fast_cycle_ms = obd_poller_cycle_ms(s->rate_hz, p->n_fast);
         }
     }
     p->have_ok = true;
@@ -112,4 +116,13 @@ void obd_poller_record(obd_poller_t *p, uint8_t pid, float value, bool ok, uint3
 const obd_snapshot_t *obd_poller_snapshot(const obd_poller_t *p)
 {
     return &p->snap;
+}
+
+uint32_t obd_poller_cycle_ms(float rate_hz, uint8_t n_fast)
+{
+    if (!(rate_hz > 0.0f) || n_fast == 0) return 0;   /* também rejeita NaN */
+    float ms = (float)n_fast * 1000.0f / rate_hz;
+    if (ms >= (float)UINT32_MAX) return UINT32_MAX;
+    uint32_t c = (uint32_t)ms;
+    return ((float)c < ms) ? c + 1 : c;
 }

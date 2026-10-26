@@ -35,6 +35,7 @@ typedef struct {
     uint32_t advice_mem[GEAR_ENGINE_ADVICE_WORDS];   /* histerese do conselho */
     float    ratios[VP_MAX_GEARS];   /* relações em uso (sementes ou aprendidas) */
     float    last_ratio;             /* relação da amostra anterior (0 = inválida) */
+    uint32_t stale_ms, hold_ms;      /* efetivos (R34) */
     float    throttle_rest;          /* menor 0x11 visto com rpm > 0, até 25% (NAN = nenhum) */
     uint8_t  n;                      /* nº de relações em uso */
     uint8_t  learner_count;          /* último resultado do aprendiz (cache) */
@@ -43,10 +44,22 @@ typedef struct {
     bool     learned_pending;        /* take_learned ainda não consumido */
 } gear_engine_t;
 
+/* Regra única de amostra velha (gear_engine e app): idade > stale_ms. */
+static inline bool gear_sample_is_stale(uint32_t now_ms, uint32_t t_ms, uint32_t stale_ms)
+{
+    return (uint32_t)(now_ms - t_ms) > stale_ms;
+}
+
 /* learned: NULL ou p->gears valores vindos do NVS (inicia já convergido). */
 void         gear_engine_init(gear_engine_t *g, const vehicle_profile_t *p, const float *learned);
 gear_state_t gear_engine_update(gear_engine_t *g, const gear_input_t *in);
 /* true uma única vez, logo após convergir. */
 bool         gear_engine_take_learned(gear_engine_t *g, float out[VP_MAX_GEARS]);
+/* Ciclo rápido medido do poller (obd_snapshot_t.fast_cycle_ms; 0 = desconhecido). R34:
+   stale efetivo = max(profile.stale_ms, 2,5 x ciclo); hold efetivo = max(profile.gear_hold_ms,
+   2 x ciclo). Sem chamada, valem os do perfil. */
+void         gear_engine_set_poll_cycle(gear_engine_t *g, uint32_t cycle_ms);
+uint32_t     gear_engine_stale_ms(const gear_engine_t *g);
+uint32_t     gear_engine_hold_ms(const gear_engine_t *g);
 /* Descarta o aprendido e volta às sementes do perfil. */
 void         gear_engine_reset_learning(gear_engine_t *g);
