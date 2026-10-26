@@ -41,6 +41,7 @@ clássico, sai sem transporte SPP e com o BSP headless (tudo no log). O app sobe
 | M5StickC Plus2 | Pinos (LCD, buzzer, botões, HOLD) e ajustes do LCD (gap, inversão, espelhamento) | valores do esquemático, a conferir |
 | OBD transporte | Nome Bluetooth do ELM327 (`OBD_ELM_BT_NAME`) | `OBDII` |
 | OBD transporte | PIN de pareamento (`OBD_ELM_BT_PIN`) | `1234` |
+| OBD poller | Gravação estendida: pedir também MAP e IAT (`OBD_POLL_EXTENDED`) | desligado |
 | Car Monitor (app) | Perfil de veículo padrão (`APP_PROFILE_ID`): `sandero_k7m` ou `generic_man` | `sandero_k7m` |
 | Car Monitor (app) | Ociosidade até dormir em ms (`APP_POWER_IDLE_MS_OVERRIDE`, depuração; 0 = 5 min) | `0` |
 
@@ -51,7 +52,14 @@ perfil padrão (`sandero_k7m`).
 
 Na primeira vez o aparelho procura o adaptador pelo nome, conecta com o PIN e salva o MAC no
 NVS; nas próximas vai direto ao MAC. Se o link cair, reconecta sozinho (espera de 2 s, dobrando
-até 30 s entre tentativas).
+até 30 s entre tentativas). Respostas estranhas do ELM (`CAN ERROR`, `BUS BUSY`, timeouts com
+o link de pé) não derrubam o link: 3 seguidas reinicializam o ELM no mesmo link.
+
+O conselho de troca só aparece depois de ~0,4 s e só some com folga (UP abaixo do limite
+− 150 RPM, DOWN acima de 1300 + 150 RPM ou ao tirar o pé); com a embreagem pisada ou no meio da
+troca não há conselho. O bipe toca uma vez por evento e só volta depois de 2 s sem conselho ou
+de uma troca de marcha. Com um ELM lento (K-line, ~4 leituras/s) o tempo de "sem dados" e a
+histerese da marcha crescem com a taxa medida.
 
 A tela começa no **diagnóstico** (status da conexão, protocolo, nº de PIDs suportados, taxa de
 leitura, RPM, velocidade e tensão da bateria). Quando chegam RPM e velocidade, troca sozinha
@@ -131,6 +139,9 @@ Ainda não validado no carro. Na primeira saída, conferir:
    (`learning` vira 0) e quantas marchas apareceram.
 6. **Marcha e conselho:** marcha certa nas 5 marchas, "-" com a embreagem pisada, azul/laranja
    nos momentos esperados e um bipe só por evento; A curto silencia.
+   - Desacelerando com o pé fora abaixo de 1300 RPM: **nunca** laranja.
+   - Mantendo o giro em cima do limite de subida (oscilando um pouco): **um bipe só**, e o
+     fundo fica azul sem piscar.
 7. **Reaprender e re-parear:** A longo volta a "aprendendo"; B longo procura o ELM pelo nome.
 8. **Sono:** carro desligado, USB ligado: dorme em ~5 min (ou no tempo do
    `APP_POWER_IDLE_MS_OVERRIDE`) e acorda pelo botão A. Com a ignição ligada e o motor

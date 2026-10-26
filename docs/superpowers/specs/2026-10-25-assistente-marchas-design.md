@@ -120,3 +120,15 @@ Biblioteca gráfica, tons exatos do bipe, estrutura interna das tasks FreeRTOS, 
 - Build para pelo menos um alvo sem BT clássico (ex.: esp32c3), confirmando que o projeto compila com o transporte SPP desligado via Kconfig.
 - Teste no host do `gear_engine` com dois perfis diferentes (Sandero e um fictício de 6 marchas), provando que nenhum número do Sandero está fixo no código.
 - A `ui` renderizada num display simulado de outra resolução (ex.: 320×240), ou num segundo BSP mínimo, sem mudar o código da `ui`.
+
+## Achados/decisões de implementação
+
+Registrados depois da revisão final do primeiro plano. Não mudam os objetivos acima; dizem como foram atendidos.
+
+- **Fonte de carga:** o `obd_poller` usa a carga calculada **0x04** como fonte principal e o acelerador **0x11** como fallback, quando o carro não tem 0x04. O 0x11 também é pedido quando existe, porque o assistente precisa dele para saber se o pé está fora (corte de injeção). O MAP (0x0B) não entra no cálculo da Etapa 1. Ele e o IAT (0x0F) só são pedidos com a gravação estendida (`OBD_POLL_EXTENDED`, desligada por padrão), porque num ELM lento cada pedido extra alonga o ciclo de RPM e velocidade.
+- **Acelerador fechado:** algumas ECUs leem 0x11 acima de 0% com o pé fora. O `gear_engine` aprende esse repouso: o menor 0x11 visto com o motor girando, limitado a 25%. "Fechado" é repouso + 2% e "aplicado" (filtro do aprendizado) é repouso + 3%.
+- **Histerese do conselho:** um conselho novo só aparece depois de 400 ms. O UP só some abaixo do limite − 150 RPM. O DOWN só some acima do RPM de "afogar" + 150 ou ao tirar o pé. Não há conselho enquanto o detector de marcha está em transição. O bipe rearma depois de 2 s sem conselho ou de uma troca de marcha, com intervalo mínimo de 3 s entre bipes.
+- **Taxa medida:** o poller estima o período do ciclo rápido pela taxa de respostas. O tempo de amostra velha passa a ser max(perfil, 2,5 × ciclo) e o hold da marcha max(perfil, 2 × ciclo).
+- **Sono:** a ociosidade conta desde o último RPM > 0. Isso cobre "RPM = 0" e "ELM sem resposta": com a ignição ligada e o motor parado o aparelho também dorme.
+- **Aprendizado:** um cluster vale com ≥ 40 amostras e ≥ 5% do **maior** cluster, para a 1ª marcha (pouco usada) não ficar de fora. A convergência exige relações estritamente crescentes, com passo ≥ 8% entre vizinhas.
+- **Erros do ELM:** respostas estranhas (`STOPPED`, `CAN ERROR`, `BUS BUSY`, `UNABLE TO CONNECT`, sem a linha 41) não derrubam o link. Três seguidas, ou timeouts com o link de pé, reinicializam o ELM. Só erro de transporte ou link caído reconecta.
