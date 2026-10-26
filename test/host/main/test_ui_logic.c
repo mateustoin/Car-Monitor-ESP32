@@ -72,42 +72,76 @@ static void test_alert_once(void)
     ui_alert_init(&a);
     int tones = 0;
     for (uint32_t t = 0; t < 10000; t += 100) {
-        ui_tone_t r = ui_alert_update(&a, SHIFT_UP, t, false);
+        ui_tone_t r = ui_alert_update(&a, SHIFT_UP, 3, t, false);
         if (r == UI_TONE_UP) tones++;
         else TEST_ASSERT_EQUAL(UI_TONE_NONE, r);
     }
     TEST_ASSERT_EQUAL(1, tones);
 }
 
-static void test_alert_min_interval(void)
+static void test_alert_short_none_does_not_rearm(void)
+{
+    /* R33: um NONE curto (< 2 s) na mesma marcha não rearma, mesmo passado o intervalo. */
+    ui_alert_t a;
+    ui_alert_init(&a);
+    TEST_ASSERT_EQUAL(UI_TONE_UP, ui_alert_update(&a, SHIFT_UP, 3, 0, false));
+    for (uint32_t t = 100; t <= 3000; t += 100)
+        TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 3, t, false));
+    for (uint32_t t = 3100; t <= 4500; t += 100)   /* NONE por 1,4 s */
+        TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_NONE, 3, t, false));
+    for (uint32_t t = 4600; t <= 9000; t += 100)
+        TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 3, t, false));
+}
+
+static void test_alert_rearms_after_long_none(void)
 {
     ui_alert_t a;
     ui_alert_init(&a);
-    TEST_ASSERT_EQUAL(UI_TONE_UP, ui_alert_update(&a, SHIFT_UP, 5000, false));
-    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_NONE, 5300, false));
-    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 6000, false));  /* < 3 s: suprimido */
-    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 9000, false));  /* sem nova transição */
-    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_NONE, 9100, false));
-    TEST_ASSERT_EQUAL(UI_TONE_UP, ui_alert_update(&a, SHIFT_UP, 9200, false));    /* >= 3 s do último bipe */
+    TEST_ASSERT_EQUAL(UI_TONE_UP, ui_alert_update(&a, SHIFT_UP, 3, 0, false));
+    for (uint32_t t = 100; t <= 3400; t += 100)    /* NONE por 3,3 s >= 2 s */
+        TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_NONE, 3, t, false));
+    TEST_ASSERT_EQUAL(UI_TONE_UP, ui_alert_update(&a, SHIFT_UP, 3, 3500, false));
+}
+
+static void test_alert_rearms_on_gear_change(void)
+{
+    ui_alert_t a;
+    ui_alert_init(&a);
+    TEST_ASSERT_EQUAL(UI_TONE_UP, ui_alert_update(&a, SHIFT_UP, 3, 0, false));
+    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_NONE, 3, 3200, false));
+    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_NONE, 4, 3300, false));
+    TEST_ASSERT_EQUAL(UI_TONE_UP, ui_alert_update(&a, SHIFT_UP, 4, 3400, false));
+}
+
+static void test_alert_min_interval(void)
+{
+    /* Rearmado pela troca de marcha, mas a menos de 3 s do último bipe: suprimido e consumido. */
+    ui_alert_t a;
+    ui_alert_init(&a);
+    TEST_ASSERT_EQUAL(UI_TONE_UP, ui_alert_update(&a, SHIFT_UP, 3, 5000, false));
+    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 4, 6000, false));
+    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 4, 9000, false));  /* não toca depois sozinho */
 }
 
 static void test_alert_direct_swap(void)
 {
     ui_alert_t a;
     ui_alert_init(&a);
-    TEST_ASSERT_EQUAL(UI_TONE_UP, ui_alert_update(&a, SHIFT_UP, 0, false));
-    TEST_ASSERT_EQUAL(UI_TONE_DOWN, ui_alert_update(&a, SHIFT_DOWN, 3000, false));
-    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 4000, false));  /* troca direta suprimida */
+    TEST_ASSERT_EQUAL(UI_TONE_UP, ui_alert_update(&a, SHIFT_UP, 3, 0, false));
+    TEST_ASSERT_EQUAL(UI_TONE_DOWN, ui_alert_update(&a, SHIFT_DOWN, 3, 3000, false));
+    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 3, 4000, false));  /* < 3 s */
 }
 
 static void test_alert_muted(void)
 {
     ui_alert_t a;
     ui_alert_init(&a);
-    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 0, true));
-    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_DOWN, 5000, true));
-    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_NONE, 9000, true));
-    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 20000, true));
+    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 3, 0, true));
+    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_DOWN, 3, 5000, true));
+    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_NONE, 3, 9000, true));
+    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 3, 20000, true));
+    /* ao reativar o som, o evento em curso (já consumido no mudo) não dispara */
+    TEST_ASSERT_EQUAL(UI_TONE_NONE, ui_alert_update(&a, SHIFT_UP, 3, 20100, false));
 }
 
 void run_ui_logic_tests(void)
@@ -117,6 +151,9 @@ void run_ui_logic_tests(void)
     RUN_TEST(test_bg_mapping);
     RUN_TEST(test_bg_rgb);
     RUN_TEST(test_alert_once);
+    RUN_TEST(test_alert_short_none_does_not_rearm);
+    RUN_TEST(test_alert_rearms_after_long_none);
+    RUN_TEST(test_alert_rearms_on_gear_change);
     RUN_TEST(test_alert_min_interval);
     RUN_TEST(test_alert_direct_swap);
     RUN_TEST(test_alert_muted);

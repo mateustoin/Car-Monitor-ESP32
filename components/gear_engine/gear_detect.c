@@ -45,3 +45,8 @@ uint8_t gear_detect_update(gear_detect_t *d, const float *ratios, uint8_t n,
     }
     return d->shown;
 }
+
+bool gear_detect_settled(const gear_detect_t *d)
+{
+    return d->candidate == d->shown;
+}

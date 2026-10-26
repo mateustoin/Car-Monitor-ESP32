@@ -264,7 +264,7 @@ static void ui_task(void *arg)
 
         /* Desconectado, um conselho de antes da queda não pode bipar. */
         shift_advice_t advice = st.connected ? c.gs.advice : SHIFT_NONE;
-        ui_tone_t tone = ui_alert_update(&c.alert, advice, now, c.muted);
+        ui_tone_t tone = ui_alert_update(&c.alert, advice, c.gs.gear, now, c.muted);
         if (tone != UI_TONE_NONE) play_tone(tone);
 
         if (tick % POWER_EVERY_TICKS == 0) check_power(&c, &st, now);

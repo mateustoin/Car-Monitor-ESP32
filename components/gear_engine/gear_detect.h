@@ -1,5 +1,6 @@
 #pragma once
 /* Detecção da marcha com histerese temporal (sem FreeRTOS nem hardware). */
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef struct {
@@ -15,3 +16,5 @@ void gear_detect_init(gear_detect_t *d);
    só muda (inclusive para 0) após o mesmo candidato persistir hold_ms. */
 uint8_t gear_detect_update(gear_detect_t *d, const float *ratios, uint8_t n,
                            float rpm, float speed_kmh, float tolerance, uint16_t hold_ms, uint32_t now_ms);
+/* true quando o candidato atual é a marcha exibida (nenhuma troca em andamento). */
+bool    gear_detect_settled(const gear_detect_t *d);

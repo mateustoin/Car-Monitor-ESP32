@@ -7,7 +7,9 @@
 
 _Static_assert(sizeof(gear_learn_t) <= sizeof(((gear_engine_t *)0)->learn_mem), "learn_mem pequeno");
 _Static_assert(sizeof(gear_detect_t) <= sizeof(((gear_engine_t *)0)->detect_mem), "detect_mem pequeno");
+_Static_assert(sizeof(shift_hyst_t) <= sizeof(((gear_engine_t *)0)->advice_mem), "advice_mem pequeno");
 _Static_assert(_Alignof(gear_learn_t) <= _Alignof(uint32_t), "alinhamento learn");
+_Static_assert(_Alignof(shift_hyst_t) <= _Alignof(uint32_t), "alinhamento advice");
 _Static_assert(_Alignof(gear_detect_t) <= _Alignof(uint32_t), "alinhamento detect");
 
 /* Filtro de amostra estável para o aprendizado */
@@ -23,6 +25,7 @@ _Static_assert(_Alignof(gear_detect_t) <= _Alignof(uint32_t), "alinhamento detec
 
 #define LEARN(g)  ((gear_learn_t *)(g)->learn_mem)
 #define DETECT(g) ((gear_detect_t *)(g)->detect_mem)
+#define ADVICE(g) ((shift_hyst_t *)(g)->advice_mem)
 
 static void use_seeds(gear_engine_t *g)
 {
@@ -58,6 +61,7 @@ void gear_engine_init(gear_engine_t *g, const vehicle_profile_t *p, const float 
     g->profile = p;
     g->throttle_rest = NAN;
     gear_detect_init(DETECT(g));
+    shift_hyst_reset(ADVICE(g));
     clear_learner(g);
     if (learned && learned_valid(p, learned)) {
         g->n = p->gears > VP_MAX_GEARS ? VP_MAX_GEARS : p->gears;
@@ -130,10 +134,14 @@ gear_state_t gear_engine_update(gear_engine_t *g, const gear_input_t *in)
                                       p->ratio_tolerance, p->gear_hold_ms, in->now_ms);
     s.learning = !g->converged;
     s.learned_gears = (s.learning && g->learner_count > g->n) ? g->learner_count : g->n;
-    if (s.stale) return s; /* gear 0, NONE */
+    if (s.stale) { /* gear 0, NONE */
+        shift_hyst_reset(ADVICE(g));
+        return s;
+    }
 
     s.gear = gear;
-    s.advice = shift_advise(p, g->ratios, g->n, gear, in, throttle_rest(g), &s.target_gear);
+    s.advice = shift_hyst_update(ADVICE(g), p, g->ratios, g->n, gear, gear_detect_settled(DETECT(g)),
+                                 in, throttle_rest(g), &s.target_gear);
     return s;
 }
 
@@ -150,6 +158,7 @@ void gear_engine_reset_learning(gear_engine_t *g)
 {
     clear_learner(g);
     gear_detect_init(DETECT(g));
+    shift_hyst_reset(ADVICE(g));
     g->converged = false;
     g->learned_pending = false;
     use_seeds(g);

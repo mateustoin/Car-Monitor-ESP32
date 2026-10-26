@@ -26,11 +26,13 @@ typedef struct {
    então o armazenamento é opaco aqui (tamanhos conferidos por _Static_assert em gear_engine.c). */
 #define GEAR_ENGINE_LEARN_WORDS  192
 #define GEAR_ENGINE_DETECT_WORDS 2
+#define GEAR_ENGINE_ADVICE_WORDS 4
 
 typedef struct {
     const vehicle_profile_t *profile;
     uint32_t learn_mem[GEAR_ENGINE_LEARN_WORDS];
     uint32_t detect_mem[GEAR_ENGINE_DETECT_WORDS];
+    uint32_t advice_mem[GEAR_ENGINE_ADVICE_WORDS];   /* histerese do conselho */
     float    ratios[VP_MAX_GEARS];   /* relações em uso (sementes ou aprendidas) */
     float    last_ratio;             /* relação da amostra anterior (0 = inválida) */
     float    throttle_rest;          /* menor 0x11 visto com rpm > 0, até 25% (NAN = nenhum) */
