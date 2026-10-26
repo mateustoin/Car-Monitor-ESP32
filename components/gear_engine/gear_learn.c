@@ -10,7 +10,8 @@
 #define MERGE_RATIO     1.08f /* centros a menos de 8% são fundidos */
 #define CAND_MIN_SAMPLES 5   /* candidatos pequenos só viram ruído de cauda */
 #define MIN_SAMPLES     40
-#define MIN_FRACTION_PC 5    /* % do total */
+#define MIN_FRACTION_PC 5    /* % do MAIOR cluster (R29: a 1ª é rara na direção real) */
+#define MIN_STEP_RATIO  1.08f /* relações vizinhas plausíveis: >= 8% de distância */
 #define MAX_CLUSTERS    16
 
 void gear_learn_init(gear_learn_t *l, uint8_t gears)
@@ -124,10 +125,13 @@ uint8_t gear_learn_result(const gear_learn_t *l, float out[VP_MAX_GEARS])
 
     n = merge_close(val, mass, n);
 
-    /* Confiável: >= 40 amostras e >= 5% do total (após a fusão). */
+    /* Confiável: >= 40 amostras e >= 5% do maior cluster (após a fusão). Relativo ao maior,
+       e não ao total, para a 1ª (pouco usada) não ficar de fora com as outras bem povoadas. */
+    uint32_t largest = 0;
+    for (int i = 0; i < n; i++) if (mass[i] > largest) largest = mass[i];
     int k = 0;
     for (int i = 0; i < n; i++) {
-        if (mass[i] >= MIN_SAMPLES && mass[i] * 100u >= (uint32_t)MIN_FRACTION_PC * l->total) {
+        if (mass[i] >= MIN_SAMPLES && (uint64_t)mass[i] * 100u >= (uint64_t)MIN_FRACTION_PC * largest) {
             val[k] = val[i];
             mass[k] = mass[i];
             k++;
@@ -155,8 +159,17 @@ uint8_t gear_learn_result(const gear_learn_t *l, float out[VP_MAX_GEARS])
     return (uint8_t)n;
 }
 
+bool gear_learn_plausible(const float *ratios, uint8_t n)
+{
+    for (uint8_t i = 0; i < n; i++) {
+        if (!(ratios[i] > 0.0f)) return false;   /* também rejeita NaN */
+        if (i > 0 && !(ratios[i] >= ratios[i - 1] * MIN_STEP_RATIO)) return false;
+    }
+    return true;
+}
+
 bool gear_learn_converged(const gear_learn_t *l)
 {
     float out[VP_MAX_GEARS];
-    return l->gears > 0 && gear_learn_result(l, out) == l->gears;
+    return l->gears > 0 && gear_learn_result(l, out) == l->gears && gear_learn_plausible(out, l->gears);
 }

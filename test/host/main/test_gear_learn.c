@@ -148,7 +148,7 @@ static void test_wide_spread_5pct(void)
 static void test_skewed_counts(void)
 {
     s_rng = 808;
-    /* 5ª com 150 de ~2650 (>5%); uma com 2% seria rejeitada pela regra dos 5% */
+    /* distribuição desigual: a 5ª (150) é 12,5% do maior cluster (1200) */
     static const int n[5] = {1200, 700, 400, 200, 150};
     gear_learn_t l;
     float out[VP_MAX_GEARS];
@@ -156,6 +156,54 @@ static void test_skewed_counts(void)
     for (int g = 0; g < 5; g++) feed(&l, FIVE[g], n[g]);
     TEST_ASSERT_EQUAL_UINT8(5, gear_learn_result(&l, out));
     check_close(FIVE, out, 5);
+}
+
+static void test_rare_first_gear_learned(void)
+{
+    /* R29: a 1ª aparece pouco na direção real. 60 amostras = ~2,9% do total (abaixo dos 5%
+       do total, que a rejeitaria), mas >= 40 e >= 5% do maior cluster (500). */
+    s_rng = 4711;
+    static const int n[5] = {60, 500, 500, 500, 500};
+    gear_learn_t l;
+    float out[VP_MAX_GEARS];
+    gear_learn_init(&l, 5);
+    for (int g = 0; g < 5; g++) feed(&l, FIVE[g], n[g]);
+    TEST_ASSERT_TRUE(60 * 100 < 5 * 2060);   /* o cenário é mesmo < 5% do total */
+    TEST_ASSERT_EQUAL_UINT8(5, gear_learn_result(&l, out));
+    check_close(FIVE, out, 5);
+    TEST_ASSERT_TRUE(gear_learn_converged(&l));
+}
+
+static void test_small_cluster_vs_largest(void)
+{
+    /* 45 amostras (>= 40) mas < 5% do maior cluster (1000): não conta. */
+    s_rng = 99;
+    gear_learn_t l;
+    float out[VP_MAX_GEARS];
+    gear_learn_init(&l, 2);
+    feed(&l, 10.0f, 45);
+    feed(&l, 20.0f, 1000);
+    TEST_ASSERT_EQUAL_UINT8(1, gear_learn_result(&l, out));
+    TEST_ASSERT_FLOAT_WITHIN(0.6f, 20.0f, out[0]);
+}
+
+static void test_plausible_ratios(void)
+{
+    static const float ok[5] = {7.5f, 13.6f, 20.0f, 27.1f, 36.9f};
+    /* cluster de ruído entre a 2ª e a 3ª: passo de 4,4% (< 8%) */
+    static const float noise[5] = {7.5f, 13.6f, 14.2f, 20.0f, 27.1f};
+    static const float flat[3] = {10.0f, 10.0f, 20.0f};
+    static const float down[3] = {10.0f, 20.0f, 15.0f};
+    TEST_ASSERT_TRUE(gear_learn_plausible(ok, 5));
+    TEST_ASSERT_FALSE(gear_learn_plausible(noise, 5));
+    TEST_ASSERT_FALSE(gear_learn_plausible(flat, 3));
+    TEST_ASSERT_FALSE(gear_learn_plausible(down, 3));
+    TEST_ASSERT_TRUE(gear_learn_plausible(ok, 1));
+    /* pouco acima de 8% passa; pouco abaixo, não */
+    static const float edge_ok[2] = {10.0f, 10.81f};
+    static const float edge_bad[2] = {10.0f, 10.79f};
+    TEST_ASSERT_TRUE(gear_learn_plausible(edge_ok, 2));
+    TEST_ASSERT_FALSE(gear_learn_plausible(edge_bad, 2));
 }
 
 void run_gear_learn_tests(void)
@@ -170,4 +218,7 @@ void run_gear_learn_tests(void)
     RUN_TEST(test_close_gears_10pct_apart);
     RUN_TEST(test_wide_spread_5pct);
     RUN_TEST(test_skewed_counts);
+    RUN_TEST(test_rare_first_gear_learned);
+    RUN_TEST(test_small_cluster_vs_largest);
+    RUN_TEST(test_plausible_ratios);
 }

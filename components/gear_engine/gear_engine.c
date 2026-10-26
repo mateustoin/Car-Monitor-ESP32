@@ -85,7 +85,9 @@ static void learn_step(gear_engine_t *g, const gear_input_t *in)
     g->since_check = 0;
     float out[VP_MAX_GEARS];
     g->learner_count = gear_learn_result(LEARN(g), out);
-    if (g->learner_count == g->profile->gears && g->learner_count > 0) {
+    /* R29: só converge com relações plausíveis (crescentes, passo >= 8%). */
+    if (g->learner_count == g->profile->gears && g->learner_count > 0
+        && gear_learn_plausible(out, g->learner_count)) {
         memset(g->ratios, 0, sizeof(g->ratios));
         memcpy(g->ratios, out, g->learner_count * sizeof(float));
         g->n = g->learner_count;

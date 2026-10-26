@@ -20,5 +20,7 @@ void    gear_learn_add(gear_learn_t *l, float ratio);
    em ordem crescente de relação (out[0] = 1ª marcha). Se houver mais clusters
    que `gears`, ficam os mais populosos. */
 uint8_t gear_learn_result(const gear_learn_t *l, float out[VP_MAX_GEARS]);
-/* result == gears */
+/* result == gears e gear_learn_plausible(result) */
 bool    gear_learn_converged(const gear_learn_t *l);
+/* Relações estritamente crescentes, cada uma >= 8% acima da anterior. */
+bool    gear_learn_plausible(const float *ratios, uint8_t n);
