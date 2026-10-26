@@ -43,9 +43,48 @@ static void test_parse_no_data(void)
     uint8_t d[4]; size_t n = 0;
     TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, elm327_parse_mode01("NO DATA", 0x0C, d, sizeof(d), &n));
     TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, elm327_parse_mode01("?", 0x0C, d, sizeof(d), &n));
-    TEST_ASSERT_EQUAL(ESP_FAIL, elm327_parse_mode01("STOPPED", 0x0C, d, sizeof(d), &n));
-    TEST_ASSERT_EQUAL(ESP_FAIL, elm327_parse_mode01("CAN ERROR", 0x0C, d, sizeof(d), &n));
-    TEST_ASSERT_EQUAL(ESP_FAIL, elm327_parse_mode01("UNABLE TO CONNECT", 0x0C, d, sizeof(d), &n));
+}
+
+static void test_parse_elm_errors(void)
+{
+    /* R32: esquisitices do ELM são ESP_ERR_INVALID_RESPONSE (ESP_FAIL fica só para o transporte). */
+    uint8_t d[4]; size_t n = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, elm327_parse_mode01("STOPPED", 0x0C, d, sizeof(d), &n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, elm327_parse_mode01("CAN ERROR", 0x0C, d, sizeof(d), &n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, elm327_parse_mode01("BUS BUSY", 0x0C, d, sizeof(d), &n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, elm327_parse_mode01("UNABLE TO CONNECT", 0x0C, d, sizeof(d), &n));
+    /* sem a linha 41 do PID pedido (resposta de outro PID ou vazia) */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, elm327_parse_mode01("410D3C", 0x0C, d, sizeof(d), &n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, elm327_parse_mode01("", 0x0C, d, sizeof(d), &n));
+}
+
+static void test_health_counter(void)
+{
+    elm327_health_t h;
+    elm327_health_init(&h);
+    /* respostas normais e NO DATA mantêm o link */
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_OK, true));
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_ERR_NOT_FOUND, true));
+    /* 3 erros de ELM (ou timeouts) seguidos com o link de pé -> reinit do ELM, sem derrubar */
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_ERR_INVALID_RESPONSE, true));
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_ERR_TIMEOUT, true));
+    TEST_ASSERT_EQUAL(ELM327_LINK_REINIT, elm327_health_update(&h, ESP_ERR_INVALID_RESPONSE, true));
+    /* o contador recomeça depois do reinit */
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_ERR_INVALID_RESPONSE, true));
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_ERR_INVALID_RESPONSE, true));
+    /* uma resposta boa no meio zera a sequência */
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_ERR_NOT_FOUND, true));
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_ERR_INVALID_RESPONSE, true));
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_ERR_INVALID_RESPONSE, true));
+    TEST_ASSERT_EQUAL(ELM327_LINK_REINIT, elm327_health_update(&h, ESP_ERR_TIMEOUT, true));
+    /* erros de transporte ou link caído -> reconectar na hora */
+    TEST_ASSERT_EQUAL(ELM327_LINK_RECONNECT, elm327_health_update(&h, ESP_ERR_INVALID_STATE, true));
+    TEST_ASSERT_EQUAL(ELM327_LINK_RECONNECT, elm327_health_update(&h, ESP_FAIL, true));
+    TEST_ASSERT_EQUAL(ELM327_LINK_RECONNECT, elm327_health_update(&h, ESP_ERR_TIMEOUT, false));
+    TEST_ASSERT_EQUAL(ELM327_LINK_RECONNECT, elm327_health_update(&h, ESP_OK, false));
+    /* depois de um RECONNECT o contador recomeça */
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_ERR_INVALID_RESPONSE, true));
+    TEST_ASSERT_EQUAL(ELM327_LINK_KEEP, elm327_health_update(&h, ESP_ERR_INVALID_RESPONSE, true));
 }
 
 static void test_parse_multi_ecu(void)
@@ -202,6 +241,27 @@ static void test_init_with_tap_sees_init(void)
     c.inner->ops->destroy(c.inner);
 }
 
+static void test_read_voltage_without_number(void)
+{
+    /* clone sem ATRV: "?" com o link de pé é erro do ELM, não do transporte */
+    counting_t c; elm327_t e; float v = 0;
+    counting_open(&c, "0\tATZ\tELM327\n1\tATE0\tOK\n2\tATL0\tOK\n3\tATS0\tOK\n4\tATH0\tOK\n"
+                      "5\tATSP0\tOK\n6\t0100\t4100BE3FA812\n7\tATDPN\tA5\n8\tATRV\t?\n");
+    TEST_ASSERT_EQUAL(ESP_OK, elm327_init(&e, &c.base, 1000));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, elm327_read_voltage(&e, &v));
+    c.inner->ops->destroy(c.inner);
+}
+
+static void test_read_pid_bus_busy(void)
+{
+    counting_t c; elm327_t e; float v = 0;
+    counting_open(&c, "0\tATZ\tELM327\n1\tATE0\tOK\n2\tATL0\tOK\n3\tATS0\tOK\n4\tATH0\tOK\n"
+                      "5\tATSP0\tOK\n6\t0100\t4100BE3FA812\n7\tATDPN\tA5\n8\t010C\tBUS BUSY\n");
+    TEST_ASSERT_EQUAL(ESP_OK, elm327_init(&e, &c.base, 1000));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, elm327_read_pid(&e, ELM_PID_RPM, &v));
+    c.inner->ops->destroy(c.inner);
+}
+
 static void test_read_pid_no_data(void)
 {
     counting_t c; elm327_t e; float v = 0;
@@ -218,6 +278,10 @@ void run_elm327_tests(void)
     RUN_TEST(test_parse_with_searching);
     RUN_TEST(test_parse_bus_init);
     RUN_TEST(test_parse_no_data);
+    RUN_TEST(test_parse_elm_errors);
+    RUN_TEST(test_health_counter);
+    RUN_TEST(test_read_voltage_without_number);
+    RUN_TEST(test_read_pid_bus_busy);
     RUN_TEST(test_parse_multi_ecu);
     RUN_TEST(test_decode_all);
     RUN_TEST(test_init_and_supported);

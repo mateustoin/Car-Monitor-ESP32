@@ -23,7 +23,7 @@ static esp_err_t read_support(elm327_t *e, uint8_t base, size_t idx, uint32_t ti
     if (err != ESP_OK) return err;
     err = elm327_parse_mode01(resp, base, d, sizeof(d), &n);
     if (err != ESP_OK) return err;
-    if (n < 4) return ESP_FAIL;
+    if (n < 4) return ESP_ERR_INVALID_RESPONSE;
     e->supported[idx] = ((uint32_t)d[0] << 24) | ((uint32_t)d[1] << 16) | ((uint32_t)d[2] << 8) | d[3];
     return ESP_OK;
 }
@@ -93,7 +93,7 @@ esp_err_t elm327_read_voltage(elm327_t *e, float *volts)
     if (err != ESP_OK) return err;
     char *end;
     float v = strtof(resp, &end);
-    if (end == resp) return ESP_FAIL;
+    if (end == resp) return ESP_ERR_INVALID_RESPONSE;   /* ex. clone sem ATRV: "?" */
     *volts = v;
     return ESP_OK;
 }

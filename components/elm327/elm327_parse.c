@@ -58,7 +58,9 @@ esp_err_t elm327_parse_mode01(const char *resp, uint8_t pid, uint8_t *data, size
         p += n;
         p += strspn(p, "\r\n");
     }
-    return saw_no_data ? ESP_ERR_NOT_FOUND : ESP_FAIL;
+    /* STOPPED, CAN ERROR, BUS BUSY, UNABLE TO CONNECT, linha de outro PID...: o ELM
+       respondeu, mas sem dado útil (R32: distinto de ESP_FAIL, que é do transporte). */
+    return saw_no_data ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_RESPONSE;
 }
 
 esp_err_t elm327_decode_pid(uint8_t pid, const uint8_t *data, size_t len, float *value)

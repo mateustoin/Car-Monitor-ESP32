@@ -1,7 +1,9 @@
 /* Task OBD: transporte → elm327 → obd_poller, com reconexão em backoff e status sob mutex.
-   Qualquer erro de transporte ou do ELM no meio da sessão derruba o link e reconecta
-   (R22: queda no meio de um comando volta como ESP_FAIL). */
+   R32: a sessão só derruba o link e reconecta com erro de transporte (ESP_ERR_INVALID_STATE,
+   ESP_FAIL) ou link caído; erros do ELM (ESP_ERR_INVALID_RESPONSE, timeout com o link de pé)
+   são contados por elm327_health e, 3 seguidos, refazem o elm327_init no mesmo link. */
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -144,12 +146,55 @@ static void publish_battery(float v)
     status_unlock();
 }
 
-/* Loop de leitura até um erro ou um pedido de re-pareamento. */
+/* Inicialização do ELM com a troca guardada para a gravação. */
+static esp_err_t elm_init(obd_transport_t *t, elm327_t *elm)
+{
+    s_init_n = 0;
+    s_in_init = true;
+    esp_err_t err = elm327_init_with_tap(elm, t, ELM_TIMEOUT_MS, obd_tap, NULL);
+    s_in_init = false;
+    if (err != ESP_OK) ESP_LOGW(TAG, "elm327_init: %s", esp_err_to_name(err));
+    return err;
+}
+
+/* Agenda nova para o ELM recém-inicializado (a máscara de PIDs pode ter mudado). */
+static void start_polling(obd_poller_t *poller, const elm327_t *elm)
+{
+    obd_poller_init(poller, pid_supported, (void *)elm, POLL_EXTENDED);
+    publish_session(elm, poller);
+}
+
+/* Aplica a decisão do elm327_health a um resultado. ESP_OK = segue a sessão; outro valor =
+   a sessão acaba com esse erro (reconectar). */
+static esp_err_t check_result(obd_transport_t *t, elm327_t *elm, obd_poller_t *poller,
+                              elm327_health_t *health, esp_err_t err, const char *what)
+{
+    bool link_up = t->ops->is_connected(t);
+    switch (elm327_health_update(health, err, link_up)) {
+    case ELM327_LINK_KEEP:
+        if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) ESP_LOGW(TAG, "%s: %s", what, esp_err_to_name(err));
+        return ESP_OK;
+    case ELM327_LINK_REINIT:
+        ESP_LOGW(TAG, "%s: %s; %d erros do ELM seguidos, reinicializando sem derrubar o link",
+                 what, esp_err_to_name(err), ELM327_REINIT_AFTER);
+        err = elm_init(t, elm);
+        if (err != ESP_OK) return err;
+        start_polling(poller, elm);
+        return ESP_OK;
+    case ELM327_LINK_RECONNECT:
+    default:
+        ESP_LOGW(TAG, "%s: %s (link %s)", what, esp_err_to_name(err), link_up ? "de pé" : "caído");
+        return err != ESP_OK ? err : ESP_ERR_INVALID_STATE;
+    }
+}
+
+/* Loop de leitura até um erro de transporte ou um pedido de re-pareamento. */
 static esp_err_t run_session(obd_transport_t *t, elm327_t *elm)
 {
     static obd_poller_t poller;
-    obd_poller_init(&poller, pid_supported, elm, POLL_EXTENDED);
-    publish_session(elm, &poller);
+    elm327_health_t health;
+    elm327_health_init(&health);
+    start_polling(&poller, elm);
     uint32_t last_atrv = app_now_ms() - ATRV_PERIOD_MS;   /* primeira leitura já */
     bool atrv_warned = false;
 
@@ -161,14 +206,15 @@ static esp_err_t run_session(obd_transport_t *t, elm327_t *elm)
             esp_err_t err = elm327_read_voltage(elm, &v);
             if (err == ESP_OK) {
                 publish_battery(v);
-            } else if (err == ESP_FAIL && t->ops->is_connected(t)) {
-                /* Resposta sem número com o link de pé (clone sem ATRV): segue sem tensão. */
+            } else if (err == ESP_ERR_INVALID_RESPONSE && t->ops->is_connected(t)) {
+                /* Resposta sem número com o link de pé (clone sem ATRV): segue sem tensão e não
+                   conta como erro do ELM (senão um clone sem ATRV reinicializaria sempre). */
                 publish_battery(NAN);
                 if (!atrv_warned) ESP_LOGW(TAG, "ATRV sem resposta numérica; tensão desconhecida");
                 atrv_warned = true;
             } else {
-                ESP_LOGW(TAG, "ATRV: %s", esp_err_to_name(err));
-                return err;
+                err = check_result(t, elm, &poller, &health, err, "ATRV");
+                if (err != ESP_OK) return err;
             }
         }
 
@@ -179,10 +225,12 @@ static esp_err_t run_session(obd_transport_t *t, elm327_t *elm)
         }
         float value = 0;
         esp_err_t err = elm327_read_pid(elm, pid, &value);
-        if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {   /* NOT_FOUND = NO DATA: o ELM respondeu */
-            ESP_LOGW(TAG, "PID %02X: %s", pid, esp_err_to_name(err));
-            return err;
-        }
+        bool answered = err == ESP_OK || err == ESP_ERR_NOT_FOUND;   /* NOT_FOUND = NO DATA */
+        char what[8];
+        snprintf(what, sizeof(what), "PID %02X", pid);
+        esp_err_t verdict = check_result(t, elm, &poller, &health, err, what);
+        if (verdict != ESP_OK) return verdict;
+        if (!answered) continue;
         now = app_now_ms();
         obd_poller_record(&poller, pid, value, err == ESP_OK, now);
         publish_sample(&poller, pid, value, err == ESP_OK, now);
@@ -252,13 +300,7 @@ static void obd_task(void *arg)
         if (t) {
             set_state(APP_OBD_CONNECTING);
             esp_err_t err = t->ops->connect(t, CONNECT_TIMEOUT_MS);
-            if (err == ESP_OK) {
-                s_init_n = 0;
-                s_in_init = true;
-                err = elm327_init_with_tap(&elm, t, ELM_TIMEOUT_MS, obd_tap, NULL);
-                s_in_init = false;
-                if (err != ESP_OK) ESP_LOGW(TAG, "elm327_init: %s", esp_err_to_name(err));
-            }
+            if (err == ESP_OK) err = elm_init(t, &elm);
             if (err == ESP_OK) {
                 if (!have_mac) remember_peer(t, &have_mac);
                 ESP_LOGI(TAG, "conectado: protocolo %s, %u PIDs", elm.protocol, count_supported(&elm));
