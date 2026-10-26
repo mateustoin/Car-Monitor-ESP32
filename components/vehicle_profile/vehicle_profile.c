@@ -1,3 +1,4 @@
+#include <math.h>
 #include <string.h>
 #include "vehicle_profile.h"
 
@@ -46,12 +47,15 @@ bool vp_validate(const vehicle_profile_t *p)
     if (p->load_light_pct >= p->load_heavy_pct || p->load_heavy_pct > 100) return false;
     if (!(p->ratio_tolerance > 0.0f && p->ratio_tolerance < 0.5f)) return false;
 
+    /* Sementes: finitas, > 0, estritamente crescentes e contíguas a partir da 1ª (0 só no fim:
+       um buraco deslocaria a numeração das marchas no gear_engine). */
     float prev = 0.0f;
+    bool ended = false;
     for (uint8_t g = 0; g < p->gears; g++) {
         float r = p->seed_ratios[g];
-        if (r < 0.0f) return false;
-        if (r == 0.0f) continue;
-        if (r <= prev) return false;
+        if (!isfinite(r) || r < 0.0f) return false;
+        if (r == 0.0f) { ended = true; continue; }
+        if (ended || r <= prev) return false;
         prev = r;
     }
     return true;

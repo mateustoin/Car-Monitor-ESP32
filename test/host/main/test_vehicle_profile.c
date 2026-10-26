@@ -1,3 +1,4 @@
+#include <math.h>
 #include <string.h>
 #include "unity.h"
 #include "vehicle_profile.h"
@@ -90,6 +91,25 @@ static void test_validate_rejects(void)
     TEST_ASSERT_FALSE(vp_validate(&p));
 }
 
+static void test_validate_seeds(void)
+{
+    vehicle_profile_t p;
+    /* não finitos */
+    p = test_six_gear; p.seed_ratios[3] = NAN;
+    TEST_ASSERT_FALSE(vp_validate(&p));
+    p = test_six_gear; p.seed_ratios[5] = INFINITY;
+    TEST_ASSERT_FALSE(vp_validate(&p));
+    /* sementes parciais valem só a partir da 1ª, sem buracos (senão a numeração desloca) */
+    p = test_six_gear; memset(p.seed_ratios, 0, sizeof(p.seed_ratios));
+    TEST_ASSERT_TRUE(vp_validate(&p));                 /* sem sementes */
+    p.seed_ratios[0] = 7.0f; p.seed_ratios[1] = 12.0f;
+    TEST_ASSERT_TRUE(vp_validate(&p));                 /* 1ª e 2ª */
+    p = test_six_gear; p.seed_ratios[0] = 0.0f;
+    TEST_ASSERT_FALSE(vp_validate(&p));                /* falta a 1ª */
+    p = test_six_gear; p.seed_ratios[2] = 0.0f;
+    TEST_ASSERT_FALSE(vp_validate(&p));                /* buraco na 3ª */
+}
+
 void run_vehicle_profile_tests(void)
 {
     RUN_TEST(test_find_default);
@@ -97,4 +117,5 @@ void run_vehicle_profile_tests(void)
     RUN_TEST(test_all_builtin_valid);
     RUN_TEST(test_six_gear_valid);
     RUN_TEST(test_validate_rejects);
+    RUN_TEST(test_validate_seeds);
 }

@@ -1,6 +1,6 @@
 #include "vehicle_profile.h"
 
-/* Renault Sandero 1.0 (K7M), câmbio JH3. Relações do JH3 ainda não
+/* Renault Sandero 1.6 8V (K7M), câmbio JH3. Relações do JH3 ainda não
    confirmadas: sem sementes, o aparelho aprende dirigindo. */
 const vehicle_profile_t profile_sandero_k7m = {
     .id = "sandero_k7m", .name = "Sandero K7M",
