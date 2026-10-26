@@ -19,5 +19,7 @@ typedef struct {
 esp_err_t ui_init(lv_display_t *disp);
 void      ui_show_gear(const gear_state_t *s, bool connected);
 void      ui_show_diag(const ui_diag_t *d);
-/* Alterna entre a tela de marcha e a de diagnóstico. */
+/* Alterna entre a tela de marcha e a de diagnóstico (sem efeito se o lock do LVGL não vier). */
 void      ui_toggle_screen(void);
+/* true se a tela visível é a de diagnóstico. */
+bool      ui_screen_is_diag(void);

@@ -25,6 +25,7 @@
 #define POWER_EVERY_TICKS 20       /* decisão de sono a cada 1 s */
 #define WAKE_DECIDE_MS    30000    /* prazo para conectar depois de acordar pelo timer */
 #define BTN_QUEUE_LEN     8
+#define STACK_LOG_MS      60000
 
 static const char *TAG = "app_ui";
 
@@ -35,10 +36,12 @@ static const vehicle_profile_t *s_profile;
 static gear_engine_t s_engine;   /* ~800 B: fora da pilha */
 
 typedef struct {
-    bool diag_active;      /* tela visível */
-    bool auto_switched;    /* já trocou (sozinho ou pelo botão) da tela inicial de diagnóstico */
+    /* A tela visível é a do módulo ui (ui_screen_is_diag); aqui só a escolha automática. */
+    bool auto_done;        /* já foi para a de marcha com dados, ou o usuário apertou B */
     bool muted;
     bool wake_pending;     /* acordou pelo timer e ainda não decidiu se fica acordado */
+    float wake_max_rpm;    /* maior RPM visto desde que acordou pelo timer */
+    bool stack_logged, rec_was_active;
     ui_alert_t alert;
     gear_state_t gs;
     bool have_gs;
@@ -102,15 +105,13 @@ static void handle_button(ui_ctx_t *c, const btn_evt_t *ev)
             gear_engine_reset_learning(&s_engine);
             esp_err_t err = storage_erase_ratios(s_profile->id);
             if (err != ESP_OK) ESP_LOGW(TAG, "storage_erase_ratios: %s", esp_err_to_name(err));
-            c->have_gs = false;
             ESP_LOGI(TAG, "reaprendendo as marchas");
         }
         break;
     case BOARD_BTN_B:
         if (!lng) {
             ui_toggle_screen();
-            c->diag_active = !c->diag_active;
-            c->auto_switched = true;
+            c->auto_done = true;
         } else {
             ESP_LOGI(TAG, "re-parear o ELM");
             app_obd_request_repair();
@@ -169,7 +170,14 @@ static const char *status_text(app_obd_state_t s)
     return "-";
 }
 
-static void show_diag(const app_obd_status_t *st)
+/* Valor só se conectado e com amostra recente; senão NAN (nada da sessão anterior). */
+static float live_value(const app_obd_status_t *st, const obd_value_t *v, uint32_t now)
+{
+    if (!st->connected || !v->valid || (uint32_t)(now - v->t_ms) > s_profile->stale_ms) return NAN;
+    return v->value;
+}
+
+static void show_diag(const app_obd_status_t *st, uint32_t now)
 {
     const obd_snapshot_t *s = &st->snap;
     ui_diag_t d = {
@@ -177,8 +185,8 @@ static void show_diag(const app_obd_status_t *st)
         .protocol = st->protocol[0] ? st->protocol : "-",
         .n_supported = st->n_supported,
         .rate_hz = s->rate_hz,
-        .rpm = s->rpm.valid ? s->rpm.value : NAN,
-        .speed_kmh = s->speed_kmh.valid ? s->speed_kmh.value : NAN,
+        .rpm = live_value(st, &s->rpm, now),
+        .speed_kmh = live_value(st, &s->speed_kmh, now),
         .battery_v = st->battery_v,
     };
     ui_show_diag(&d);
@@ -194,12 +202,14 @@ static void go_sleep(const char *why)
 static void check_power(ui_ctx_t *c, const app_obd_status_t *st, uint32_t now)
 {
     if (c->wake_pending) {
-        /* Espera tensão e RPM (até WAKE_DECIDE_MS) e decide uma vez. */
-        bool ready = st->connected && !isnan(st->battery_v) && st->snap.rpm.valid;
-        if (!ready && now < WAKE_DECIDE_MS) return;
+        /* Decide uma vez: fica se a tensão ou algum RPM já mostram o motor ligado; dorme assim
+           que a tensão chegar abaixo de POWER_RUN_V sem RPM > 0, ou no fim do prazo. */
+        float rpm = live_value(st, &st->snap.rpm, now);
+        if (rpm > c->wake_max_rpm) c->wake_max_rpm = rpm;   /* NAN compara falso */
+        bool stay = power_should_stay_awake_after_wake(st->battery_v, c->wake_max_rpm);
+        if (!stay && isnan(st->battery_v) && now < WAKE_DECIDE_MS) return;
         c->wake_pending = false;
-        float rpm = st->snap.rpm.valid ? st->snap.rpm.value : NAN;
-        if (power_should_stay_awake_after_wake(st->battery_v, rpm)) {
+        if (stay) {
             ESP_LOGI(TAG, "acordou pelo timer: motor ligado, continua acordado");
         } else {
             go_sleep("acordou pelo timer e o motor não está ligado");
@@ -225,10 +235,6 @@ static void ui_task(void *arg)
     c.gs.stale = true;
     if (c.wake_pending) ESP_LOGI(TAG, "acordou pelo timer: checando o motor");
 
-    /* Tela inicial: diagnóstico (Etapa 0) até haver dados. */
-    ui_toggle_screen();
-    c.diag_active = true;
-
     TickType_t wake = xTaskGetTickCount();
     for (uint32_t tick = 0;; tick++) {
         btn_evt_t ev;
@@ -239,18 +245,18 @@ static void ui_task(void *arg)
         uint32_t now = app_now_ms();
         step_engine(&c, &st, now);
 
-        bool have_data = st.connected && st.snap.rpm.valid && st.snap.speed_kmh.valid;
-        if (!c.auto_switched && have_data) {
-            if (c.diag_active) ui_toggle_screen();
-            c.diag_active = false;
-            c.auto_switched = true;
+        /* Diagnóstico (Etapa 0) até haver dados, depois marcha, uma vez; B assume o controle.
+           Se o toggle falhar (lock do LVGL), tenta de novo no próximo tick. */
+        if (!c.auto_done) {
+            bool have_data = st.connected && st.snap.rpm.valid && st.snap.speed_kmh.valid;
+            if (ui_screen_is_diag() == have_data) ui_toggle_screen();
+            if (have_data && !ui_screen_is_diag()) c.auto_done = true;
         }
 
-        if (c.diag_active) {
-            if (tick % DIAG_EVERY_TICKS == 0) show_diag(&st);
-        } else {
-            ui_show_gear(&c.gs, st.connected);
-        }
+        /* As duas telas sempre atualizadas (cada uma só redesenha se mudar): a visível nunca
+           fica congelada com um conselho velho, seja qual for a tela. */
+        ui_show_gear(&c.gs, st.connected);
+        if (tick % DIAG_EVERY_TICKS == 0) show_diag(&st, now);
 
         /* Desconectado, um conselho de antes da queda não pode bipar. */
         shift_advice_t advice = st.connected ? c.gs.advice : SHIFT_NONE;
@@ -258,6 +264,15 @@ static void ui_task(void *arg)
         if (tone != UI_TONE_NONE) play_tone(tone);
 
         if (tick % POWER_EVERY_TICKS == 0) check_power(&c, &st, now);
+
+        /* Uso de stack (checklist no carro): uma vez aos 60 s e a cada "rec off". */
+        bool rec_on = rec_active();
+        if ((!c.stack_logged && now >= STACK_LOG_MS) || (c.rec_was_active && !rec_on)) {
+            c.stack_logged = true;
+            ESP_LOGI(TAG, "stack livre mínima: app_obd %lu B, app_ui %lu B",
+                     (unsigned long)app_obd_stack_free(), (unsigned long)uxTaskGetStackHighWaterMark(NULL));
+        }
+        c.rec_was_active = rec_on;
 
         vTaskDelayUntil(&wake, pdMS_TO_TICKS(UI_PERIOD_MS));
     }

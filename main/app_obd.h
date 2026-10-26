@@ -34,5 +34,7 @@ static inline uint32_t app_now_ms(void)
 esp_err_t app_obd_start(void);
 /* Cópia do status atual, sob mutex. */
 void      app_obd_get(app_obd_status_t *out);
+/* Stack livre mínima da task (bytes); 0 se ela não existe mais. */
+uint32_t  app_obd_stack_free(void);
 /* Esquece o MAC salvo e reconecta procurando pelo nome (botão B longo). */
 void      app_obd_request_repair(void);

@@ -96,7 +96,10 @@ static void test_reset_learning_returns_to_seeds(void)
     gear_engine_t g;
     uint32_t t = 0;
     gear_engine_init(&g, vp_find("generic_man"), R5);
+    feed(&g, &t, 2000, 40, 30, 1000);
+    TEST_ASSERT_TRUE(g.last_ratio > 0);
     gear_engine_reset_learning(&g);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, g.last_ratio);   /* amostra anterior ao reset não conta como estável */
     gear_state_t s = feed(&g, &t, 2000, 40, 30, 1000);
     TEST_ASSERT_TRUE(s.learning);
     TEST_ASSERT_EQUAL_UINT8(0, s.learned_gears);

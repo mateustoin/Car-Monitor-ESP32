@@ -194,6 +194,11 @@ void ui_show_diag(const ui_diag_t *d)
     board_lvgl_unlock();
 }
 
+bool ui_screen_is_diag(void)
+{
+    return s_diag_active;
+}
+
 void ui_toggle_screen(void)
 {
     s_diag_active = !s_diag_active;

@@ -48,6 +48,12 @@ void app_obd_get(app_obd_status_t *out)
     status_unlock();
 }
 
+uint32_t app_obd_stack_free(void)
+{
+    TaskHandle_t task = s_task;
+    return task ? uxTaskGetStackHighWaterMark(task) : 0;
+}
+
 void app_obd_request_repair(void)
 {
     s_repair = true;
@@ -270,6 +276,7 @@ static void obd_task(void *arg)
 static void obd_task(void *arg)
 {
     ESP_LOGW(TAG, "sem transporte disponível");
+    s_task = NULL;   /* xTaskCreate já gravou o handle antes de a task rodar */
     vTaskDelete(NULL);
 }
 
