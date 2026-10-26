@@ -25,4 +25,5 @@ esp_err_t rec_init(void);                      /* monta LittleFS da partição "
 esp_err_t rec_start(int sinks);                /* cria /littlefs/trip_NNN.tsv se REC_SINK_FLASH */
 void rec_tap(void *arg, const char *cmd, const char *resp); /* compatível com elm327_tap_t */
 void rec_stop(void);
+bool rec_active(void);                         /* true enquanto há gravação ligada */
 esp_err_t rec_console_register(void);          /* "rec on|off|ls|dump|clear" */

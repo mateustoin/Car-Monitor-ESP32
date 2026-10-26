@@ -24,8 +24,12 @@ typedef struct {
     void *tap_arg;
 } elm327_t;
 
-/* Inicializa o ELM327 (ATZ..ATSP0, 0100, ATDPN e 0120/0140 se anunciados). */
+/* Inicializa o ELM327 (ATZ..ATSP0, 0100, ATDPN e 0120/0140 se anunciados). Zera *e (tap inclusive). */
 esp_err_t elm327_init(elm327_t *e, obd_transport_t *t, uint32_t timeout_ms);
+/* Igual a elm327_init, mas já com o tap ligado: a troca de inicialização também passa por ele
+   (a gravação fica reproduzível pelo transport_replay). */
+esp_err_t elm327_init_with_tap(elm327_t *e, obd_transport_t *t, uint32_t timeout_ms,
+                               elm327_tap_t tap, void *tap_arg);
 bool      elm327_pid_supported(const elm327_t *e, uint8_t pid);
 /* ESP_ERR_NOT_FOUND = NO DATA */
 esp_err_t elm327_read_pid(elm327_t *e, uint8_t pid, float *value);

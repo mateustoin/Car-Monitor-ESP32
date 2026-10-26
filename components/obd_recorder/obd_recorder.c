@@ -135,6 +135,12 @@ esp_err_t rec_start(int sinks)
     return err;
 }
 
+/* Leitura sem mutex: um int alinhado; quem chama só quer saber se a gravação começou. */
+bool rec_active(void)
+{
+    return s_sinks != 0;
+}
+
 void rec_stop(void)
 {
     if (!lock_take(1000)) {

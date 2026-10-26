@@ -30,10 +30,18 @@ static esp_err_t read_support(elm327_t *e, uint8_t base, size_t idx, uint32_t ti
 
 esp_err_t elm327_init(elm327_t *e, obd_transport_t *t, uint32_t timeout_ms)
 {
+    return elm327_init_with_tap(e, t, timeout_ms, NULL, NULL);
+}
+
+esp_err_t elm327_init_with_tap(elm327_t *e, obd_transport_t *t, uint32_t timeout_ms,
+                               elm327_tap_t tap, void *tap_arg)
+{
     if (!e || !t) return ESP_ERR_INVALID_ARG;
     memset(e, 0, sizeof(*e));
     e->t = t;
     e->timeout_ms = timeout_ms;
+    e->tap = tap;
+    e->tap_arg = tap_arg;
 
     static const char *const setup[] = { "ATZ", "ATE0", "ATL0", "ATS0", "ATH0", "ATSP0" };
     char resp[RESP_CAP];

@@ -186,6 +186,22 @@ static void test_tap_called(void)
     c.inner->ops->destroy(c.inner);
 }
 
+/* Com init_with_tap a troca de inicialização também passa pelo tap (gravação reproduzível). */
+static void test_init_with_tap_sees_init(void)
+{
+    counting_t c; elm327_t e;
+    counting_open(&c, INIT_REC);
+    tap_n = 0;
+    tap_cmd[0] = '\0';
+    memset(&e, 0xA5, sizeof(e));   /* lixo: init_with_tap não pode depender do conteúdo anterior */
+    TEST_ASSERT_EQUAL(ESP_OK, elm327_init_with_tap(&e, &c.base, 1000, tap_cb, NULL));
+    TEST_ASSERT_EQUAL(8, tap_n);
+    TEST_ASSERT_EQUAL_STRING("ATDPN", tap_cmd);
+    TEST_ASSERT_EQUAL_STRING("A5", tap_resp);
+    TEST_ASSERT_TRUE(e.tap == tap_cb);
+    c.inner->ops->destroy(c.inner);
+}
+
 static void test_read_pid_no_data(void)
 {
     counting_t c; elm327_t e; float v = 0;
@@ -209,5 +225,6 @@ void run_elm327_tests(void)
     RUN_TEST(test_init_fails_without_0100);
     RUN_TEST(test_read_voltage);
     RUN_TEST(test_tap_called);
+    RUN_TEST(test_init_with_tap_sees_init);
     RUN_TEST(test_read_pid_no_data);
 }

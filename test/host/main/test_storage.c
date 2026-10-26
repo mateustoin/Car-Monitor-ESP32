@@ -116,6 +116,18 @@ static void test_mac_roundtrip(void)
     TEST_ASSERT_EQUAL_UINT8_ARRAY(mac, out, 6);
 }
 
+static void test_mac_erase(void)
+{
+    ensure_init();
+    uint8_t out[6];
+    const uint8_t mac[6] = {0x00, 0x1D, 0xA5, 0x68, 0x98, 0x8B};
+    TEST_ASSERT_EQUAL(ESP_OK, storage_set_elm_mac(mac));
+    TEST_ASSERT_EQUAL(ESP_OK, storage_erase_elm_mac());
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, storage_get_elm_mac(out));
+    /* apagar de novo (já ausente) não é erro */
+    TEST_ASSERT_EQUAL(ESP_OK, storage_erase_elm_mac());
+}
+
 static void test_profile_id_roundtrip(void)
 {
     ensure_init();
@@ -138,5 +150,6 @@ void run_storage_tests(void)
     RUN_TEST(test_invalid_args);
     RUN_TEST(test_mute_default_false_then_true);
     RUN_TEST(test_mac_roundtrip);
+    RUN_TEST(test_mac_erase);
     RUN_TEST(test_profile_id_roundtrip);
 }

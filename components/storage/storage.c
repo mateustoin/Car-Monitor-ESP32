@@ -160,6 +160,18 @@ esp_err_t storage_set_elm_mac(const uint8_t mac[6])
     return e;
 }
 
+esp_err_t storage_erase_elm_mac(void)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NS, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_erase_key(h, "elm_mac");
+    if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
 esp_err_t storage_get_profile_id(char *out, size_t cap)
 {
     if (!out || cap == 0) return ESP_ERR_INVALID_ARG;

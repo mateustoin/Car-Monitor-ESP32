@@ -22,6 +22,7 @@ esp_err_t storage_set_mute(bool m);
 
 esp_err_t storage_get_elm_mac(uint8_t mac[6]);   /* ESP_ERR_NOT_FOUND se nunca pareado */
 esp_err_t storage_set_elm_mac(const uint8_t mac[6]);
+esp_err_t storage_erase_elm_mac(void);           /* ESP_OK também se já não havia MAC */
 
 esp_err_t storage_get_profile_id(char *out, size_t cap);  /* ESP_ERR_NOT_FOUND se vazio */
 esp_err_t storage_set_profile_id(const char *id);
