@@ -134,6 +134,26 @@ static void publish_sample(const obd_poller_t *poller, uint8_t pid, float value,
     status_unlock();
 }
 
+/* Gravação automática na flash (APP_REC_AUTOSTART): começa no primeiro RPM > 0 desde o boot,
+   e não na conexão, para os acordes do timer com o carro desligado não criarem viagens vazias.
+   Uma vez por boot: um "rec off" no console não é desfeito. */
+static void rec_autostart(uint8_t pid, float value, bool ok)
+{
+#if CONFIG_APP_REC_AUTOSTART
+    static bool done;
+    if (done || !ok || pid != ELM_PID_RPM || value <= 0) return;
+    done = true;
+    if (rec_active()) return;   /* já ligada pelo console */
+    esp_err_t err = rec_start(REC_SINK_FLASH);
+    if (err == ESP_OK) ESP_LOGI(TAG, "gravação automática na flash iniciada (motor ligado)");
+    else ESP_LOGW(TAG, "gravação automática não iniciou: %s", esp_err_to_name(err));
+#else
+    (void)pid;
+    (void)value;
+    (void)ok;
+#endif
+}
+
 static void publish_battery(float v)
 {
     status_lock();
@@ -229,6 +249,7 @@ static esp_err_t run_session(obd_transport_t *t, elm327_t *elm)
         now = app_now_ms();
         obd_poller_record(&poller, pid, value, err == ESP_OK, now);
         publish_sample(&poller, pid, value, err == ESP_OK, now);
+        rec_autostart(pid, value, err == ESP_OK);
     }
     return ESP_OK;
 }

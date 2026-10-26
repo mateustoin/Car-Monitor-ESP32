@@ -15,4 +15,14 @@ menu "Car Monitor (app)"
             debug: encurta o tempo ocioso (motor parado e ELM sem dados) antes de dormir,
             para testar o sono profundo sem esperar 5 min. Deixe 0 no uso normal.
 
+    config APP_REC_AUTOSTART
+        bool "Gravar a viagem na flash automaticamente"
+        default n
+        help
+            Sem notebook no carro: a cada boot, a gravação na flash (como "rec on flash")
+            começa sozinha na primeira leitura de RPM > 0. Para no "rec off" ou antes do sono
+            profundo; o próximo boot cria outra viagem. Exportar depois pelo console com
+            "rec ls" e "rec dump <n>"; apagar com "rec clear". Com a flash cheia a gravação
+            para (as viagens antigas ficam).
+
 endmenu

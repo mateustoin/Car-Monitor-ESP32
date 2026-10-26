@@ -44,6 +44,7 @@ clássico, sai sem transporte SPP e com o BSP headless (tudo no log). O app sobe
 | OBD poller | Gravação estendida: pedir também MAP e IAT (`OBD_POLL_EXTENDED`) | desligado |
 | Car Monitor (app) | Perfil de veículo padrão (`APP_PROFILE_ID`): `sandero_k7m` ou `generic_man` | `sandero_k7m` |
 | Car Monitor (app) | Ociosidade até dormir em ms (`APP_POWER_IDLE_MS_OVERRIDE`, depuração; 0 = 5 min) | `0` |
+| Car Monitor (app) | Gravar a viagem na flash automaticamente (`APP_REC_AUTOSTART`) | desligado |
 
 Um perfil salvo no NVS tem prioridade sobre `APP_PROFILE_ID`; um id desconhecido cai no
 perfil padrão (`sandero_k7m`).
@@ -96,9 +97,12 @@ arquivo reproduzível no PC:
 
     idf.py monitor | grep '^REC' | cut -f2- > viagem.tsv
 
-Sem notebook no carro: `rec on flash` (ou `both`), rode a viagem e, depois, com o USB no PC,
-`rec ls` e `rec dump <n>` com o mesmo `grep`/`cut` acima. A gravação para sozinha antes do
-sono profundo.
+Sem notebook no carro, ligue `APP_REC_AUTOSTART` no menuconfig e grave o firmware: a cada
+boot, a gravação na flash começa sozinha na primeira leitura de RPM > 0 (os acordes do timer
+com o motor parado não criam viagens). Depois da viagem, com o USB no PC, `rec ls` e
+`rec dump <n>` com o mesmo `grep`/`cut` acima. A gravação para sozinha antes do sono profundo e
+ao encher a flash (cerca de 5 MB, umas 2 h de viagem); apague as já exportadas com `rec clear`.
+Com o notebook ligado à placa, `rec on flash` (ou `both`) faz o mesmo na mão.
 
 ## Replay de uma gravação no PC
 
