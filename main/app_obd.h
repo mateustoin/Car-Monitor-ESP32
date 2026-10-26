@@ -22,6 +22,7 @@ typedef struct {
     uint8_t n_supported;           /* nº de PIDs suportados (sem os marcadores 0x20/0x40/0x60) */
     uint32_t last_elm_ok_ms;       /* última leitura de PID com dado válido */
     uint32_t last_engine_running_ms; /* última leitura de RPM > 0 */
+    uint32_t rpm_answers;          /* pedidos de RPM respondidos desde o boot (valor ou NO DATA) */
 } app_obd_status_t;
 
 /* Relógio comum às tasks (ms desde o boot). */

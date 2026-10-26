@@ -202,12 +202,16 @@ static void go_sleep(const char *why)
 static void check_power(ui_ctx_t *c, const app_obd_status_t *st, uint32_t now)
 {
     if (c->wake_pending) {
-        /* Decide uma vez: fica se a tensão ou algum RPM já mostram o motor ligado; dorme assim
-           que a tensão chegar abaixo de POWER_RUN_V sem RPM > 0, ou no fim do prazo. */
+        /* Decide uma vez: fica se a tensão ou algum RPM já mostram o motor ligado. Dorme cedo
+           só com tensão < POWER_RUN_V e depois de algum pedido de RPM respondido (valor ou NO
+           DATA): o ATRV sai antes do primeiro RPM, e na partida a tensão ainda está baixa.
+           Sem isso, dorme no fim do prazo. O boot após o sono é a sessão de despertar, então
+           o contador desde o boot basta. */
         float rpm = live_value(st, &st->snap.rpm, now);
         if (rpm > c->wake_max_rpm) c->wake_max_rpm = rpm;   /* NAN compara falso */
         bool stay = power_should_stay_awake_after_wake(st->battery_v, c->wake_max_rpm);
-        if (!stay && isnan(st->battery_v) && now < WAKE_DECIDE_MS) return;
+        bool can_judge = !isnan(st->battery_v) && st->rpm_answers > 0;
+        if (!stay && !can_judge && now < WAKE_DECIDE_MS) return;
         c->wake_pending = false;
         if (stay) {
             ESP_LOGI(TAG, "acordou pelo timer: motor ligado, continua acordado");

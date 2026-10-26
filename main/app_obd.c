@@ -127,6 +127,7 @@ static void publish_sample(const obd_poller_t *poller, uint8_t pid, float value,
     status_lock();
     s_status.snap = *obd_poller_snapshot(poller);
     if (ok) s_status.last_elm_ok_ms = now;
+    if (pid == ELM_PID_RPM) s_status.rpm_answers++;   /* só chega aqui com valor ou NO DATA */
     if (ok && pid == ELM_PID_RPM && value > 0) s_status.last_engine_running_ms = now;
     status_unlock();
 }

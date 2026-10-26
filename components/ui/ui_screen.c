@@ -201,13 +201,14 @@ bool ui_screen_is_diag(void)
 
 void ui_toggle_screen(void)
 {
-    s_diag_active = !s_diag_active;
-    ESP_LOGI(TAG, "tela: %s", s_diag_active ? "diagnóstico" : "marcha");
-    if (s_disp == NULL) return;
-    if (!board_lvgl_lock(UI_LOCK_TIMEOUT_MS)) {
+    if (s_disp == NULL) {
         s_diag_active = !s_diag_active;
+        ESP_LOGI(TAG, "tela: %s", s_diag_active ? "diagnóstico" : "marcha");
         return;
     }
+    if (!board_lvgl_lock(UI_LOCK_TIMEOUT_MS)) return;   /* sem efeito: quem chama tenta de novo */
+    s_diag_active = !s_diag_active;
+    ESP_LOGI(TAG, "tela: %s", s_diag_active ? "diagnóstico" : "marcha");
     if (s_diag_active) {
         lv_obj_remove_flag(s_diag_view, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_gear_view, LV_OBJ_FLAG_HIDDEN);

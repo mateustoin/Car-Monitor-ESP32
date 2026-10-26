@@ -71,7 +71,7 @@ Use o re-pareamento ao trocar de adaptador: com um MAC salvo o aparelho não pro
 Com o motor parado (sem RPM > 0 e sem leitura válida do ELM) por 5 min **e** a bateria abaixo
 de 13,0 V (ou desconhecida), o aparelho para a gravação e dorme. Acorda pelo botão A, ou a
 cada 10 min pelo timer: aí tenta conectar por até 30 s e só continua acordado se a tensão for
-≥ 13,2 V ou o RPM for > 0 (volta a dormir assim que lê uma tensão menor sem RPM). Para testar rápido, ajuste `APP_POWER_IDLE_MS_OVERRIDE`
+≥ 13,2 V ou o RPM for > 0 (volta a dormir assim que lê uma tensão menor e o ELM já respondeu ao pedido de RPM sem RPM > 0). Para testar rápido, ajuste `APP_POWER_IDLE_MS_OVERRIDE`
 (ex.: `30000`).
 
 ## Gravação de viagens (obd_recorder)
