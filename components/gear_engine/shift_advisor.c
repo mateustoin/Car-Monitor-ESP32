@@ -1,7 +1,7 @@
 #include "shift_advisor.h"
 #include <math.h>
 
-#define THROTTLE_CLOSED_PCT 2.0f
+#define THROTTLE_CLOSED_PCT 2.0f   /* acima do repouso aprendido */
 #define LOAD_CLOSED_PCT     15.0f  /* fallback sem sensor de acelerador */
 
 static float up_limit(const vehicle_profile_t *p, float load)
@@ -12,14 +12,15 @@ static float up_limit(const vehicle_profile_t *p, float load)
     return p->up_rpm_light + f * (float)(p->up_rpm_heavy - p->up_rpm_light);
 }
 
-static bool throttle_closed(const gear_input_t *in)
+bool shift_throttle_closed(const gear_input_t *in, float throttle_rest_pct)
 {
     if (isnan(in->throttle_pct)) return in->load_pct < LOAD_CLOSED_PCT;
-    return in->throttle_pct <= THROTTLE_CLOSED_PCT;
+    return in->throttle_pct <= throttle_rest_pct + THROTTLE_CLOSED_PCT;
 }
 
 shift_advice_t shift_advise(const vehicle_profile_t *p, const float *ratios, uint8_t n,
-                            uint8_t gear, const gear_input_t *in, uint8_t *target)
+                            uint8_t gear, const gear_input_t *in, float throttle_rest_pct,
+                            uint8_t *target)
 {
     *target = 0;
     if (gear == 0 || gear > n || !(in->rpm > 0)) return SHIFT_NONE;
@@ -33,7 +34,7 @@ shift_advice_t shift_advise(const vehicle_profile_t *p, const float *ratios, uin
     }
 
     if (gear > 1 && in->rpm < (float)p->lug_rpm && in->load_pct >= (float)p->lug_load_pct
-        && !throttle_closed(in)) {
+        && !shift_throttle_closed(in, throttle_rest_pct)) {
         uint8_t best = 0;
         for (int k = gear - 1; k >= 1; k--) { /* da maior para a menor: a primeira que serve */
             float pred = in->rpm * ratios[gear - 1] / ratios[k - 1];

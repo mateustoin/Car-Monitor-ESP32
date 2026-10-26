@@ -9,7 +9,7 @@ static shift_advice_t adv(uint8_t gear, float rpm, float load, float thr, uint8_
     const vehicle_profile_t *p = vp_default();
     gear_input_t in = {.now_ms = 0, .sample_ms = 0, .rpm = rpm, .speed_kmh = 50,
                        .load_pct = load, .throttle_pct = thr};
-    return shift_advise(p, R, 5, gear, &in, tgt);
+    return shift_advise(p, R, 5, gear, &in, 0.0f, tgt);
 }
 
 static void test_upshift_light_load(void)
@@ -81,7 +81,7 @@ static void test_downshift_falls_back_to_previous_gear(void)
     static const float close[3] = {10.0f, 11.0f, 12.0f};
     gear_input_t in = {.rpm = 1000, .speed_kmh = 12, .load_pct = 80, .throttle_pct = 70};
     uint8_t t = 0;
-    TEST_ASSERT_EQUAL(SHIFT_DOWN, shift_advise(vp_default(), close, 3, 3, &in, &t));
+    TEST_ASSERT_EQUAL(SHIFT_DOWN, shift_advise(vp_default(), close, 3, 3, &in, 0.0f, &t));
     TEST_ASSERT_EQUAL_UINT8(2, t);
 }
 
@@ -91,8 +91,18 @@ static void test_no_downshift_above_redline(void)
     static const float steep[2] = {10.0f, 80.0f};
     gear_input_t in = {.rpm = 1200, .speed_kmh = 96, .load_pct = 80, .throttle_pct = 70};
     uint8_t t = 9;
-    TEST_ASSERT_EQUAL(SHIFT_NONE, shift_advise(vp_default(), steep, 2, 2, &in, &t));
+    TEST_ASSERT_EQUAL(SHIFT_NONE, shift_advise(vp_default(), steep, 2, 2, &in, 0.0f, &t));
     TEST_ASSERT_EQUAL_UINT8(0, t);
+}
+
+static void test_throttle_closed_uses_rest(void)
+{
+    gear_input_t in = {.rpm = 1200, .load_pct = 80, .throttle_pct = 14};
+    TEST_ASSERT_TRUE(shift_throttle_closed(&in, 12));    /* 14 <= 12 + 2 */
+    in.throttle_pct = 14.5f;
+    TEST_ASSERT_FALSE(shift_throttle_closed(&in, 12));
+    in.throttle_pct = 2;
+    TEST_ASSERT_TRUE(shift_throttle_closed(&in, 0));
 }
 
 void run_shift_advisor_tests(void)
@@ -108,4 +118,5 @@ void run_shift_advisor_tests(void)
     RUN_TEST(test_top_gear_no_up);
     RUN_TEST(test_no_advice_without_gear);
     RUN_TEST(test_downshift_falls_back_to_previous_gear);
+    RUN_TEST(test_throttle_closed_uses_rest);
 }

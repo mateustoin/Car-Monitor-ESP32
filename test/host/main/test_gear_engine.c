@@ -119,6 +119,60 @@ static void test_six_gear_profile(void)
     TEST_ASSERT_EQUAL_UINT8(6, s.learned_gears);
 }
 
+/* como feed, com acelerador informado */
+static gear_state_t feed_thr(gear_engine_t *g, uint32_t *t, float rpm, float spd, float load, float thr,
+                             uint32_t dur_ms, int *downs)
+{
+    gear_state_t s = {0};
+    for (uint32_t e = 0; e < dur_ms; e += 100) {
+        gear_input_t in = mk(*t, rpm, spd, load);
+        in.throttle_pct = thr;
+        s = gear_engine_update(g, &in);
+        if (downs && s.advice == SHIFT_DOWN) (*downs)++;
+        *t += 100;
+    }
+    return s;
+}
+
+static void test_resting_throttle_coast_no_down(void)
+{
+    /* R30: ECU com 0x11 em 12% de pé fora. 5ª a 1200 RPM com carga alta: com o acelerador
+       no repouso (12%) é desaceleração, não pedido de força -> nunca DOWN. */
+    gear_engine_t g;
+    uint32_t t = 0;
+    int downs = 0;
+    gear_engine_init(&g, vp_default(), R5);
+    gear_state_t s = feed_thr(&g, &t, 1200, 1.2f * R5[4], 80, 12, 3000, &downs);
+    TEST_ASSERT_EQUAL_UINT8(5, s.gear);
+    TEST_ASSERT_EQUAL(0, downs);
+    /* pisando (12 -> 40%) a redução volta a ser sugerida */
+    s = feed_thr(&g, &t, 1200, 1.2f * R5[4], 80, 40, 2000, &downs);
+    TEST_ASSERT_EQUAL(SHIFT_DOWN, s.advice);
+}
+
+static void test_resting_throttle_not_applied_for_learning(void)
+{
+    /* Carga baixa (5%) e acelerador em repouso (12%): não é amostra estável. */
+    gear_engine_t g;
+    uint32_t t = 0;
+    gear_engine_init(&g, vp_find("generic_man"), NULL);
+    gear_state_t s = feed_thr(&g, &t, 2000, 40, 5, 12, 60000, NULL);
+    TEST_ASSERT_EQUAL_UINT8(0, s.learned_gears);
+    /* 20% fica > repouso + 3 -> aplicado: o aprendiz passa a contar */
+    s = feed_thr(&g, &t, 2000, 40, 5, 20, 60000, NULL);
+    TEST_ASSERT_EQUAL_UINT8(1, s.learned_gears);
+}
+
+static void test_resting_throttle_capped(void)
+{
+    /* Mínimo saturado em 25%: um acelerador sempre em 40% não vira "fechado". */
+    gear_engine_t g;
+    uint32_t t = 0;
+    gear_engine_init(&g, vp_default(), R5);
+    gear_state_t s = feed_thr(&g, &t, 1200, 1.2f * R5[4], 80, 40, 3000, NULL);
+    TEST_ASSERT_EQUAL(SHIFT_DOWN, s.advice);
+}
+
 static void check_invalid_learned(const float *bad)
 {
     gear_engine_t g;
@@ -153,4 +207,7 @@ void run_gear_engine_tests(void)
     RUN_TEST(test_reset_learning_returns_to_seeds);
     RUN_TEST(test_six_gear_profile);
     RUN_TEST(test_invalid_learned_is_ignored);
+    RUN_TEST(test_resting_throttle_coast_no_down);
+    RUN_TEST(test_resting_throttle_not_applied_for_learning);
+    RUN_TEST(test_resting_throttle_capped);
 }

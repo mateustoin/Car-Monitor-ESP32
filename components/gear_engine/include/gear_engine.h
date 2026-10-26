@@ -33,6 +33,7 @@ typedef struct {
     uint32_t detect_mem[GEAR_ENGINE_DETECT_WORDS];
     float    ratios[VP_MAX_GEARS];   /* relações em uso (sementes ou aprendidas) */
     float    last_ratio;             /* relação da amostra anterior (0 = inválida) */
+    float    throttle_rest;          /* menor 0x11 visto com rpm > 0, até 25% (NAN = nenhum) */
     uint8_t  n;                      /* nº de relações em uso */
     uint8_t  learner_count;          /* último resultado do aprendiz (cache) */
     uint8_t  since_check;            /* amostras estáveis desde a última checagem */

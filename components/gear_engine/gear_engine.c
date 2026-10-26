@@ -14,8 +14,10 @@ _Static_assert(_Alignof(gear_detect_t) <= _Alignof(uint32_t), "alinhamento detec
 #define STABLE_MIN_SPEED_KMH 10.0f
 #define STABLE_MIN_RPM       1000.0f
 #define STABLE_MIN_LOAD_PCT  10.0f
-#define STABLE_MIN_THROTTLE  3.0f
+#define STABLE_MIN_THROTTLE  3.0f   /* acima do repouso aprendido */
 #define STABLE_MAX_RATIO_JUMP 0.03f
+/* Repouso do acelerador (R30): algumas ECUs leem 0x11 > 0 com o pé fora. */
+#define THROTTLE_REST_MAX    25.0f
 /* gear_learn_converged refaz o clustering a cada chamada: só checa a cada N amostras estáveis */
 #define CHECK_EVERY 20
 
@@ -54,6 +56,7 @@ void gear_engine_init(gear_engine_t *g, const vehicle_profile_t *p, const float 
 {
     memset(g, 0, sizeof(*g));
     g->profile = p;
+    g->throttle_rest = NAN;
     gear_detect_init(DETECT(g));
     clear_learner(g);
     if (learned && learned_valid(p, learned)) {
@@ -65,10 +68,24 @@ void gear_engine_init(gear_engine_t *g, const vehicle_profile_t *p, const float 
     }
 }
 
-static bool is_stable(const gear_input_t *in, float ratio, float prev_ratio)
+/* Repouso em uso: 0 até a primeira leitura de 0x11 com o motor girando. */
+static float throttle_rest(const gear_engine_t *g)
+{
+    return isnan(g->throttle_rest) ? 0.0f : g->throttle_rest;
+}
+
+static void observe_throttle(gear_engine_t *g, const gear_input_t *in)
+{
+    float thr = in->throttle_pct;
+    if (!(in->rpm > 0) || !isfinite(thr) || thr < 0) return;
+    if (thr > THROTTLE_REST_MAX) thr = THROTTLE_REST_MAX;
+    if (isnan(g->throttle_rest) || thr < g->throttle_rest) g->throttle_rest = thr;
+}
+
+static bool is_stable(const gear_input_t *in, float ratio, float prev_ratio, float rest)
 {
     if (in->speed_kmh < STABLE_MIN_SPEED_KMH || in->rpm < STABLE_MIN_RPM) return false;
-    if (!(in->load_pct >= STABLE_MIN_LOAD_PCT || in->throttle_pct > STABLE_MIN_THROTTLE)) return false;
+    if (!(in->load_pct >= STABLE_MIN_LOAD_PCT || in->throttle_pct > rest + STABLE_MIN_THROTTLE)) return false;
     if (prev_ratio <= 0) return false;
     return fabsf(ratio - prev_ratio) < STABLE_MAX_RATIO_JUMP * prev_ratio;
 }
@@ -76,7 +93,7 @@ static bool is_stable(const gear_input_t *in, float ratio, float prev_ratio)
 static void learn_step(gear_engine_t *g, const gear_input_t *in)
 {
     float ratio = (in->rpm > 0 && in->speed_kmh > 0) ? in->speed_kmh / (in->rpm / 1000.0f) : 0;
-    bool stable = is_stable(in, ratio, g->last_ratio);
+    bool stable = is_stable(in, ratio, g->last_ratio, throttle_rest(g));
     g->last_ratio = ratio;
     if (!stable || g->converged) return;
 
@@ -101,8 +118,12 @@ gear_state_t gear_engine_update(gear_engine_t *g, const gear_input_t *in)
     const vehicle_profile_t *p = g->profile;
     gear_state_t s = {0};
     s.stale = (uint32_t)(in->now_ms - in->sample_ms) > p->stale_ms;
-    if (s.stale) g->last_ratio = 0;
-    else learn_step(g, in);
+    if (s.stale) {
+        g->last_ratio = 0;
+    } else {
+        observe_throttle(g, in);
+        learn_step(g, in);
+    }
 
     float rpm = s.stale ? 0 : in->rpm, spd = s.stale ? 0 : in->speed_kmh;
     uint8_t gear = gear_detect_update(DETECT(g), g->ratios, g->n, rpm, spd,
@@ -112,7 +133,7 @@ gear_state_t gear_engine_update(gear_engine_t *g, const gear_input_t *in)
     if (s.stale) return s; /* gear 0, NONE */
 
     s.gear = gear;
-    s.advice = shift_advise(p, g->ratios, g->n, gear, in, &s.target_gear);
+    s.advice = shift_advise(p, g->ratios, g->n, gear, in, throttle_rest(g), &s.target_gear);
     return s;
 }
 
