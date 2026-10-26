@@ -28,11 +28,9 @@ static void play_tone(bool up)
 /* Console na UART0 com o comando "rec" (gravação da viagem; ver obd_recorder). */
 static void start_console(void)
 {
+    /* Sem LittleFS ainda dá para gravar só na serial, então o console sobe mesmo assim. */
     esp_err_t err = rec_init();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "gravador indisponível: %s", esp_err_to_name(err));
-        return;
-    }
+    if (err != ESP_OK) ESP_LOGW(TAG, "flash indisponível, só gravação serial: %s", esp_err_to_name(err));
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_cfg = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     repl_cfg.prompt = "carmon> ";

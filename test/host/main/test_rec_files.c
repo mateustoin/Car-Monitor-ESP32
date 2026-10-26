@@ -18,6 +18,7 @@ static void test_trip_index_invalid(void)
     TEST_ASSERT_EQUAL(-1, rec_trip_index("trip_001.tsv.bak"));
     TEST_ASSERT_EQUAL(-1, rec_trip_index("trip_1a.tsv"));
     TEST_ASSERT_EQUAL(-1, rec_trip_index("other_001.tsv"));
+    TEST_ASSERT_EQUAL(-1, rec_trip_index("trip_1234567.tsv"));
 }
 
 void run_rec_files_tests(void)

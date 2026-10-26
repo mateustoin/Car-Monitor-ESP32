@@ -32,7 +32,7 @@ static int s_sinks;               /* máscara de rec_sink_t ativa */
 static FILE *s_file;
 static int s_file_index = -1;
 static uint32_t s_last_flush_ms;
-static uint32_t s_lines, s_drops;
+static volatile uint32_t s_lines, s_drops;
 
 static bool lock_take(uint32_t ms) { return s_lock && xSemaphoreTake(s_lock, pdMS_TO_TICKS(ms)) == pdTRUE; }
 static void lock_give(void) { xSemaphoreGive(s_lock); }
@@ -42,12 +42,13 @@ static void trip_path(char *out, size_t cap, int index)
     snprintf(out, cap, MOUNT_POINT "/trip_%03d.tsv", index);
 }
 
-/* Próximo índice livre: 1 + maior NNN existente (0 se não há viagens). */
+/* Próximo índice livre: 1 + maior NNN existente (0 se não há viagens); -1 se o diretório
+   não abre (não arriscar sobrescrever trip_000.tsv). */
 static int next_trip_index(void)
 {
     int max = -1;
     DIR *d = opendir(MOUNT_POINT);
-    if (!d) return 0;
+    if (!d) return -1;
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
         int n = rec_trip_index(e->d_name);
@@ -67,10 +68,16 @@ esp_err_t rec_init(void)
     esp_vfs_littlefs_conf_t conf = {
         .base_path = MOUNT_POINT,
         .partition_label = PARTITION_LABEL,
-        .format_if_mount_failed = true,
+        .format_if_mount_failed = false,
         .dont_mount = false,
     };
     esp_err_t err = esp_vfs_littlefs_register(&conf);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "montagem falhou (%s): FORMATANDO a partição \"%s\", viagens antigas perdidas",
+                 esp_err_to_name(err), PARTITION_LABEL);
+        conf.format_if_mount_failed = true;
+        err = esp_vfs_littlefs_register(&conf);
+    }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "falha ao montar LittleFS: %s", esp_err_to_name(err));
         return err;
@@ -102,6 +109,11 @@ esp_err_t rec_start(int sinks)
     esp_err_t err = ESP_OK;
     if (sinks & REC_SINK_FLASH) {
         int idx = next_trip_index();
+        if (idx < 0) {
+            ESP_LOGE(TAG, "não foi possível listar " MOUNT_POINT);
+            lock_give();
+            return ESP_FAIL;
+        }
         char path[40];
         trip_path(path, sizeof(path), idx);
         s_file = fopen(path, "w");
@@ -125,7 +137,10 @@ esp_err_t rec_start(int sinks)
 
 void rec_stop(void)
 {
-    if (!lock_take(1000)) return;
+    if (!lock_take(1000)) {
+        ESP_LOGW(TAG, "rec_stop: mutex ocupado, gravação não foi parada");
+        return;
+    }
     uint32_t lines = s_lines, drops = s_drops;
     bool was_active = s_sinks != 0;
     close_file_locked();
@@ -155,7 +170,8 @@ void rec_tap(void *arg, const char *cmd, const char *resp)
                 size_t len = strlen(line);
                 bool bad = fwrite(line, 1, len, s_file) != len;
                 if (!bad && now - s_last_flush_ms >= FLUSH_MS) {
-                    bad = fflush(s_file) != 0;
+                    /* fflush não basta no LittleFS: os metadados só são confirmados no sync */
+                    bad = fflush(s_file) != 0 || fsync(fileno(s_file)) != 0;
                     s_last_flush_ms = now;
                 }
                 if (bad) {
@@ -231,13 +247,15 @@ static void cmd_dump(int index)
 
 static void cmd_clear(void)
 {
-    if (lock_take(100)) {
-        bool busy = (s_sinks & REC_SINK_FLASH) != 0;
-        lock_give();
-        if (busy) {
-            printf("pare a gravação antes (rec off)\n");
-            return;
-        }
+    if (!lock_take(100)) {
+        printf("gravador ocupado, tente de novo\n");
+        return;
+    }
+    bool busy = (s_sinks & REC_SINK_FLASH) != 0;
+    lock_give();
+    if (busy) {
+        printf("pare a gravação antes (rec off)\n");
+        return;
     }
     DIR *d = opendir(MOUNT_POINT);
     if (!d) return;
