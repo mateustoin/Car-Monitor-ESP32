@@ -3,10 +3,11 @@
 
 bool power_should_sleep_after(const power_inputs_t *in, uint32_t idle_ms)
 {
-    /* Aritmética uint32 segura contra volta do contador. */
-    uint32_t since_engine = in->now_ms - in->last_engine_running_ms;
-    uint32_t since_elm = in->now_ms - in->last_elm_ok_ms;
-    uint32_t idle = since_engine < since_elm ? since_engine : since_elm;
+    /* Spec: RPM = 0 OU ELM sem resposta. Os dois casos param de atualizar
+       last_engine_running_ms (só RPM > 0 atualiza), então ele sozinho mede a ociosidade;
+       uma ECU que responde com RPM 0 não mantém o aparelho acordado.
+       Aritmética uint32 segura contra volta do contador. */
+    uint32_t idle = in->now_ms - in->last_engine_running_ms;
     if (idle < idle_ms) {
         return false;
     }

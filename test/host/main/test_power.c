@@ -32,12 +32,13 @@ static void test_elm_gone_sleeps(void)
     TEST_ASSERT_TRUE(power_should_sleep(&in));
 }
 
-static void test_recent_elm_keeps_awake(void)
+static void test_ecu_answering_rpm_zero_sleeps(void)
 {
-    /* Motor parado há 6 min, mas o ELM respondeu há 1 s: ocioso = 1 s. */
+    /* Spec: RPM = 0 OU ELM mudo. A ECU responde (há 1 s), mas o RPM está em 0 há 6 min
+       e a bateria está em 12,4 V (ignição ligada, motor parado): dorme. */
     power_inputs_t in = { .now_ms = 10 * MIN_MS, .last_engine_running_ms = 4 * MIN_MS,
                           .last_elm_ok_ms = 10 * MIN_MS - 1000, .battery_v = 12.4f };
-    TEST_ASSERT_FALSE(power_should_sleep(&in));
+    TEST_ASSERT_TRUE(power_should_sleep(&in));
 }
 
 static void test_idle_boundary(void)
@@ -90,7 +91,7 @@ void run_power_tests(void)
     RUN_TEST(test_idle_low_v_sleeps);
     RUN_TEST(test_idle_high_v_no_sleep);
     RUN_TEST(test_elm_gone_sleeps);
-    RUN_TEST(test_recent_elm_keeps_awake);
+    RUN_TEST(test_ecu_answering_rpm_zero_sleeps);
     RUN_TEST(test_idle_boundary);
     RUN_TEST(test_wrap_safe);
     RUN_TEST(test_sleep_after_override);

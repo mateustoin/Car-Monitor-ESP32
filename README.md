@@ -68,8 +68,9 @@ Use o re-pareamento ao trocar de adaptador: com um MAC salvo o aparelho não pro
 
 ### Energia
 
-Com o motor parado (sem RPM > 0 e sem leitura válida do ELM) por 5 min **e** a bateria abaixo
-de 13,0 V (ou desconhecida), o aparelho para a gravação e dorme. Acorda pelo botão A, ou a
+Sem nenhuma leitura de RPM > 0 por 5 min (motor parado com a ECU respondendo RPM 0, ou o ELM
+mudo) **e** a bateria abaixo de 13,0 V (ou desconhecida), o aparelho para a gravação e dorme.
+Com a ignição ligada e o motor parado ele também dorme. Acorda pelo botão A, ou a
 cada 10 min pelo timer: aí tenta conectar por até 30 s e só continua acordado se a tensão for
 ≥ 13,2 V ou o RPM for > 0 (volta a dormir assim que lê uma tensão menor e o ELM já respondeu ao pedido de RPM sem RPM > 0). Para testar rápido, ajuste `APP_POWER_IDLE_MS_OVERRIDE`
 (ex.: `30000`).
@@ -132,7 +133,8 @@ Ainda não validado no carro. Na primeira saída, conferir:
    nos momentos esperados e um bipe só por evento; A curto silencia.
 7. **Reaprender e re-parear:** A longo volta a "aprendendo"; B longo procura o ELM pelo nome.
 8. **Sono:** carro desligado, USB ligado: dorme em ~5 min (ou no tempo do
-   `APP_POWER_IDLE_MS_OVERRIDE`) e acorda pelo botão A. Depois de 10 min dormindo, acorda,
+   `APP_POWER_IDLE_MS_OVERRIDE`) e acorda pelo botão A. Com a ignição ligada e o motor
+   parado também dorme em ~5 min. Depois de 10 min dormindo, acorda,
    tenta o ELM por até 30 s e volta a dormir.
 9. **Stack:** anotar a linha `stack livre mínima: app_obd N B, app_ui N B` do log (sai aos
    60 s de uso e a cada `rec off`, de preferência depois da viagem gravada). Abaixo de ~1 KB,
