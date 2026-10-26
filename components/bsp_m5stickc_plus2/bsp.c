@@ -17,18 +17,18 @@
 
 static const char *TAG = "bsp_plus2";
 
-/* Pinos: conferir no esquemático M5Stack. */
-#define PIN_LCD_MOSI 15
-#define PIN_LCD_SCLK 13
-#define PIN_LCD_DC   14
-#define PIN_LCD_RST  12
-#define PIN_LCD_CS   5
-#define PIN_LCD_BL   27
-#define PIN_BUZZER   2
-#define PIN_BTN_A    37   /* só entrada, pull-up externo, ativo baixo */
-#define PIN_BTN_B    39   /* só entrada, pull-up externo, ativo baixo */
-#define PIN_BTN_PWR  35   /* só entrada, ativo baixo */
-#define PIN_HOLD     4    /* nível alto mantém a placa ligada na bateria */
+/* Pinos vêm do Kconfig ("M5StickC Plus2"); defaults de memória, conferir no esquemático M5Stack. */
+#define PIN_LCD_MOSI CONFIG_BSP_PLUS2_PIN_LCD_MOSI
+#define PIN_LCD_SCLK CONFIG_BSP_PLUS2_PIN_LCD_SCLK
+#define PIN_LCD_DC   CONFIG_BSP_PLUS2_PIN_LCD_DC
+#define PIN_LCD_RST  CONFIG_BSP_PLUS2_PIN_LCD_RST
+#define PIN_LCD_CS   CONFIG_BSP_PLUS2_PIN_LCD_CS
+#define PIN_LCD_BL   CONFIG_BSP_PLUS2_PIN_LCD_BL
+#define PIN_BUZZER   CONFIG_BSP_PLUS2_PIN_BUZZER
+#define PIN_BTN_A    CONFIG_BSP_PLUS2_PIN_BTN_A    /* ativo baixo; precisa ser RTC (ext0) */
+#define PIN_BTN_B    CONFIG_BSP_PLUS2_PIN_BTN_B    /* ativo baixo */
+#define PIN_BTN_PWR  CONFIG_BSP_PLUS2_PIN_BTN_PWR  /* ativo baixo */
+#define PIN_HOLD     CONFIG_BSP_PLUS2_PIN_HOLD     /* alto mantém a placa ligada; precisa ser RTC (hold no sono) */
 
 /* LCD 135x240 em paisagem: conferir no esquemático M5Stack. */
 #define LCD_HOST       SPI2_HOST
@@ -68,7 +68,7 @@ static const char *TAG = "bsp_plus2";
 #define BUZZER_TIMER   LEDC_TIMER_0
 #define BUZZER_CHANNEL LEDC_CHANNEL_0
 #define BUZZER_RES     LEDC_TIMER_10_BIT
-#define BUZZER_DUTY    (1u << (10 - 1))   /* 50% */
+#define BUZZER_DUTY    (1u << ((unsigned)BUZZER_RES - 1))   /* 50% */
 
 #define BTN_POLL_MS     20
 #define BTN_DEBOUNCE_N  2                 /* leituras iguais seguidas = 40 ms */
@@ -148,11 +148,15 @@ static esp_err_t lcd_init(void)
     };
     err = esp_lcd_new_panel_st7789(io, &panel_cfg, &panel);
     if (err != ESP_OK) return err;
-    esp_lcd_panel_reset(panel);
-    esp_lcd_panel_init(panel);
-    esp_lcd_panel_invert_color(panel, LCD_INVERT);
+    err = esp_lcd_panel_reset(panel);
+    if (err != ESP_OK) return err;
+    err = esp_lcd_panel_init(panel);
+    if (err != ESP_OK) return err;
+    err = esp_lcd_panel_invert_color(panel, LCD_INVERT);
+    if (err != ESP_OK) return err;
     /* O painel tem 240x320 de RAM; a janela visível começa no gap (conferir no esquemático M5Stack). */
-    esp_lcd_panel_set_gap(panel, CONFIG_BSP_PLUS2_LCD_GAP_X, CONFIG_BSP_PLUS2_LCD_GAP_Y);
+    err = esp_lcd_panel_set_gap(panel, CONFIG_BSP_PLUS2_LCD_GAP_X, CONFIG_BSP_PLUS2_LCD_GAP_Y);
+    if (err != ESP_OK) return err;
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     err = lvgl_port_init(&port_cfg);
@@ -181,7 +185,8 @@ static esp_err_t lcd_init(void)
     s_disp = lvgl_port_add_disp(&disp_cfg);
     if (s_disp == NULL) return ESP_FAIL;
 
-    esp_lcd_panel_disp_on_off(panel, true);
+    err = esp_lcd_panel_disp_on_off(panel, true);
+    if (err != ESP_OK) return err;
     gpio_set_level(PIN_LCD_BL, 1);
     return ESP_OK;
 }
@@ -327,11 +332,21 @@ void board_deep_sleep(uint32_t wake_after_ms)
 {
     ESP_LOGI(TAG, "sono profundo (timer %lu ms ou BTN_A)", (unsigned long)wake_after_ms);
     if (s_btn_timer) esp_timer_stop(s_btn_timer);
+    if (s_buzzer_off) {
+        esp_timer_stop(s_buzzer_off);
+        buzzer_off_cb(NULL);   /* não dorme com o buzzer tocando */
+    }
     gpio_set_level(PIN_LCD_BL, 0);
-    if (wake_after_ms > 0) esp_sleep_enable_timer_wakeup((uint64_t)wake_after_ms * 1000);
-    esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BTN_A, 0);
-    /* GPIO4 é pino RTC: gpio_hold_en mantém o nível alto durante o sono profundo. */
+    esp_err_t err;
+    if (wake_after_ms > 0) {
+        err = esp_sleep_enable_timer_wakeup((uint64_t)wake_after_ms * 1000);
+        if (err != ESP_OK) ESP_LOGE(TAG, "timer de despertar falhou: %s", esp_err_to_name(err));
+    }
+    err = esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BTN_A, 0);
+    if (err != ESP_OK) ESP_LOGE(TAG, "ext0 em BTN_A falhou (pino precisa ser RTC): %s", esp_err_to_name(err));
+    /* HOLD é pino RTC: gpio_hold_en mantém o nível alto durante o sono profundo. */
     gpio_set_level(PIN_HOLD, 1);
-    gpio_hold_en(PIN_HOLD);
+    err = gpio_hold_en(PIN_HOLD);
+    if (err != ESP_OK) ESP_LOGE(TAG, "hold do pino HOLD falhou (pino precisa ser RTC): %s", esp_err_to_name(err));
     esp_deep_sleep_start();
 }

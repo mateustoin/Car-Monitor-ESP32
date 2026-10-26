@@ -10,7 +10,9 @@ typedef enum { BOARD_BTN_A, BOARD_BTN_B, BOARD_BTN_PWR } board_button_t;
 typedef enum { BOARD_PRESS_SHORT, BOARD_PRESS_LONG } board_press_t;   /* longo >= 2000 ms */
 #define BOARD_LONG_PRESS_MS 2000
 
-/* Chamado na task de varredura dos botões, ao soltar (curto) ou ao atingir 2000 ms (longo). */
+/* Chamado ao soltar (curto) ou ao atingir 2000 ms segurando (longo).
+   Roda na task do esp_timer: não pode bloquear nem chamar LVGL; deve só postar
+   o evento numa fila e retornar. */
 typedef void (*board_button_cb_t)(board_button_t b, board_press_t p, void *arg);
 
 esp_err_t     board_init(void);

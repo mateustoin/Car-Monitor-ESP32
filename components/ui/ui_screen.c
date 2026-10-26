@@ -86,6 +86,7 @@ esp_err_t ui_init(lv_display_t *disp)
         return ESP_OK;
     }
 
+    if (!board_lvgl_lock(0)) return ESP_ERR_TIMEOUT;
     int32_t w = lv_display_get_horizontal_resolution(disp);
     int32_t h = lv_display_get_vertical_resolution(disp);
     ui_layout_t lay = ui_layout_compute((uint16_t)w, (uint16_t)h);
@@ -94,7 +95,6 @@ esp_err_t ui_init(lv_display_t *disp)
     const lv_font_t *target_font = font_for_px(target_px);
     const lv_font_t *status_font = font_for_px((uint16_t)lay.status.h);
 
-    if (!board_lvgl_lock(0)) return ESP_ERR_TIMEOUT;
     lv_obj_t *scr = lv_display_get_screen_active(disp);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);

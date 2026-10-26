@@ -32,4 +32,60 @@ menu "M5StickC Plus2"
         bool "Ordem de cores BGR (em vez de RGB)"
         default n
 
+    # Pinos: valores de memória, conferir no esquemático M5Stack.
+    config BSP_PLUS2_PIN_LCD_MOSI
+        int "Pino: LCD MOSI"
+        range 0 39
+        default 15
+
+    config BSP_PLUS2_PIN_LCD_SCLK
+        int "Pino: LCD SCLK"
+        range 0 39
+        default 13
+
+    config BSP_PLUS2_PIN_LCD_DC
+        int "Pino: LCD DC"
+        range 0 39
+        default 14
+
+    config BSP_PLUS2_PIN_LCD_RST
+        int "Pino: LCD RST"
+        range 0 39
+        default 12
+
+    config BSP_PLUS2_PIN_LCD_CS
+        int "Pino: LCD CS"
+        range 0 39
+        default 5
+
+    config BSP_PLUS2_PIN_LCD_BL
+        int "Pino: LCD backlight"
+        range 0 39
+        default 27
+
+    config BSP_PLUS2_PIN_BUZZER
+        int "Pino: Buzzer (LEDC)"
+        range 0 39
+        default 2
+
+    config BSP_PLUS2_PIN_BTN_A
+        int "Pino: Botão A (precisa ser GPIO RTC: despertar ext0)"
+        range 0 39
+        default 37
+
+    config BSP_PLUS2_PIN_BTN_B
+        int "Pino: Botão B"
+        range 0 39
+        default 39
+
+    config BSP_PLUS2_PIN_BTN_PWR
+        int "Pino: Botão PWR/C"
+        range 0 39
+        default 35
+
+    config BSP_PLUS2_PIN_HOLD
+        int "Pino: Trava de energia HOLD (precisa ser GPIO RTC: hold no sono profundo)"
+        range 0 39
+        default 4
+
 endmenu
