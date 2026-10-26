@@ -94,6 +94,7 @@ static void r_destroy(obd_transport_t *t)
 static const obd_transport_ops_t replay_ops = {
     .connect = r_connect, .write = r_write, .read = r_read,
     .disconnect = r_disconnect, .is_connected = r_is_connected, .destroy = r_destroy,
+    .get_peer = NULL,   /* gravação não tem endereço */
 };
 
 esp_err_t transport_replay_create(const char *recording, size_t chunk, obd_transport_t **out)

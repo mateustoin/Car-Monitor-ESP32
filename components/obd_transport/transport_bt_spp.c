@@ -427,10 +427,17 @@ static void bt_destroy(obd_transport_t *t)
     s_bt.in_use = false;
 }
 
+static esp_err_t bt_get_peer(obd_transport_t *t, uint8_t peer[OBD_TRANSPORT_PEER_LEN])
+{
+    return transport_bt_spp_get_peer(t, peer);
+}
+
 static const obd_transport_ops_t bt_ops = {
     .connect = bt_connect, .write = bt_write, .read = bt_read,
     .disconnect = bt_disconnect, .is_connected = bt_is_connected, .destroy = bt_destroy,
+    .get_peer = bt_get_peer,
 };
+_Static_assert(OBD_TRANSPORT_PEER_LEN == sizeof(esp_bd_addr_t), "tamanho do MAC");
 
 esp_err_t transport_bt_spp_create(const transport_bt_spp_config_t *cfg, obd_transport_t **out)
 {

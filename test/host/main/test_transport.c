@@ -108,6 +108,29 @@ static void test_replay_eof(void)
     t->ops->destroy(t);
 }
 
+static void test_replay_has_no_peer(void)
+{
+    obd_transport_t *t;
+    uint8_t peer[OBD_TRANSPORT_PEER_LEN];
+    TEST_ASSERT_EQUAL(ESP_OK, transport_replay_create("0\tATZ\tELM\n", 0, &t));
+    TEST_ASSERT_NULL(t->ops->get_peer);
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, obd_transport_get_peer(t, peer));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, obd_transport_get_peer(NULL, peer));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, obd_transport_get_peer(t, NULL));
+    t->ops->destroy(t);
+}
+
+static void test_default_transport_unavailable_on_host(void)
+{
+    /* No alvo linux não há SPP: a fábrica diz que não há transporte. */
+    obd_transport_default_cfg_t cfg = {.name = "OBDII", .pin = "1234", .peer = NULL};
+    obd_transport_t *t = (obd_transport_t *)&cfg;   /* qualquer valor: tem de voltar NULL */
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, obd_transport_create_default(&cfg, &t));
+    TEST_ASSERT_NULL(t);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, obd_transport_create_default(NULL, &t));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, obd_transport_create_default(&cfg, NULL));
+}
+
 void run_transport_tests(void)
 {
     RUN_TEST(test_rec_roundtrip);
@@ -118,4 +141,6 @@ void run_transport_tests(void)
     RUN_TEST(test_replay_unknown_cmd);
     RUN_TEST(test_replay_clock);
     RUN_TEST(test_replay_eof);
+    RUN_TEST(test_replay_has_no_peer);
+    RUN_TEST(test_default_transport_unavailable_on_host);
 }

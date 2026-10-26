@@ -3,7 +3,8 @@
 #include "obd_transport.h"
 
 /* Transporte Bluetooth clássico (SPP) para adaptadores ELM327.
-   Só existe com CONFIG_OBD_TRANSPORT_BT_SPP (ESP32 com BT clássico habilitado).
+   Só existe com CONFIG_OBD_TRANSPORT_BT_SPP (ESP32 com BT clássico habilitado). O app não
+   inclui este header: usa obd_transport_create_default() e obd_transport_get_peer().
 
    - O NVS precisa estar inicializado antes (storage_init / nvs_flash_init): o
      Bluedroid guarda as chaves de pareamento nele.

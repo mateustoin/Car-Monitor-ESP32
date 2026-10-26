@@ -14,13 +14,10 @@
 #include "elm327.h"
 #include "obd_recorder.h"
 #include "storage.h"
-#if CONFIG_OBD_TRANSPORT_BT_SPP
-#include "transport_bt_spp.h"
-#endif
 
 #define OBD_TASK_PRIO       5
 #define OBD_TASK_STACK      6144
-#define CONNECT_TIMEOUT_MS  16000   /* busca GAP completa (ver transport_bt_spp.h) */
+#define CONNECT_TIMEOUT_MS  16000   /* cobre a busca completa do SPP (ver transport_bt_spp.h) */
 #define ELM_TIMEOUT_MS      2000
 #define ATRV_PERIOD_MS      10000
 #define BACKOFF_MIN_MS      2000
@@ -66,8 +63,6 @@ void app_obd_request_repair(void)
     s_repair = true;
     if (s_task) xTaskNotifyGive(s_task);   /* interrompe a espera do backoff */
 }
-
-#if CONFIG_OBD_TRANSPORT_BT_SPP
 
 static void set_state(app_obd_state_t state)
 {
@@ -238,35 +233,39 @@ static esp_err_t run_session(obd_transport_t *t, elm327_t *elm)
     return ESP_OK;
 }
 
-/* Cria o transporte com o MAC do NVS, ou procurando pelo nome se não houver. */
-static obd_transport_t *create_transport(bool *have_mac)
+/* Cria o transporte padrão do build (Kconfig) com o endereço do NVS, ou procurando pelo
+   nome se não houver. ESP_ERR_NOT_SUPPORTED: o build não tem transporte. */
+static esp_err_t create_transport(obd_transport_t **out, bool *have_mac)
 {
-    uint8_t mac[6];
+    uint8_t mac[OBD_TRANSPORT_PEER_LEN];
     *have_mac = storage_get_elm_mac(mac) == ESP_OK;
-    transport_bt_spp_config_t cfg = {
+    obd_transport_default_cfg_t cfg = {
         .name = CONFIG_OBD_ELM_BT_NAME,
         .pin = CONFIG_OBD_ELM_BT_PIN,
-        .mac = *have_mac ? mac : NULL,
+        .peer = *have_mac ? mac : NULL,
     };
     obd_transport_t *t = NULL;
-    esp_err_t err = transport_bt_spp_create(&cfg, &t);
+    esp_err_t err = obd_transport_create_default(&cfg, &t);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "transport_bt_spp_create: %s", esp_err_to_name(err));
-        return NULL;
+        if (err != ESP_ERR_NOT_SUPPORTED) ESP_LOGE(TAG, "obd_transport_create_default: %s", esp_err_to_name(err));
+        return err;
     }
     if (*have_mac) {
         ESP_LOGI(TAG, "ELM salvo: %02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     } else {
         ESP_LOGI(TAG, "sem ELM salvo: procurando \"%s\"", CONFIG_OBD_ELM_BT_NAME);
     }
-    return t;
+    *out = t;
+    return ESP_OK;
 }
 
-/* Primeira conexão por nome: guarda o MAC para as próximas irem direto. */
+/* Primeira conexão por nome: guarda o endereço para as próximas irem direto. Transporte sem
+   endereço (get_peer opcional) não guarda nada. */
 static void remember_peer(obd_transport_t *t, bool *have_mac)
 {
-    uint8_t mac[6];
-    esp_err_t err = transport_bt_spp_get_peer(t, mac);
+    uint8_t mac[OBD_TRANSPORT_PEER_LEN];
+    esp_err_t err = obd_transport_get_peer(t, mac);
+    if (err == ESP_ERR_NOT_SUPPORTED) return;
     if (err == ESP_OK) err = storage_set_elm_mac(mac);
     if (err == ESP_OK) {
         *have_mac = true;
@@ -295,7 +294,10 @@ static void obd_task(void *arg)
             t = NULL;
             backoff = BACKOFF_MIN_MS;
         }
-        if (!t) t = create_transport(&have_mac);
+        if (!t) {
+            esp_err_t err = create_transport(&t, &have_mac);
+            if (err == ESP_ERR_NOT_SUPPORTED) break;   /* build sem transporte */
+        }
 
         if (t) {
             set_state(APP_OBD_CONNECTING);
@@ -317,29 +319,19 @@ static void obd_task(void *arg)
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(backoff));
         backoff = backoff * 2 > BACKOFF_MAX_MS ? BACKOFF_MAX_MS : backoff * 2;
     }
-}
 
-#else  /* sem CONFIG_OBD_TRANSPORT_BT_SPP */
-
-static void obd_task(void *arg)
-{
-    ESP_LOGW(TAG, "sem transporte disponível");
+    ESP_LOGW(TAG, "sem transporte disponível neste build");
+    set_state(APP_OBD_NO_TRANSPORT);
     s_task = NULL;   /* xTaskCreate já gravou o handle antes de a task rodar */
     vTaskDelete(NULL);
 }
-
-#endif
 
 esp_err_t app_obd_start(void)
 {
     s_lock = xSemaphoreCreateMutex();
     if (!s_lock) return ESP_ERR_NO_MEM;
     memset(&s_status, 0, sizeof(s_status));
-#if CONFIG_OBD_TRANSPORT_BT_SPP
-    s_status.state = APP_OBD_CONNECTING;
-#else
-    s_status.state = APP_OBD_NO_TRANSPORT;
-#endif
+    s_status.state = APP_OBD_CONNECTING;   /* a task troca para NO_TRANSPORT se o build não tiver */
     s_status.battery_v = NAN;
     if (xTaskCreate(obd_task, "app_obd", OBD_TASK_STACK, NULL, OBD_TASK_PRIO, &s_task) != pdPASS) {
         return ESP_ERR_NO_MEM;

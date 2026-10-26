@@ -1,6 +1,6 @@
 # obd_transport.c e transport_replay.c são puros: compilam igual no alvo linux
 # (testes no host) e no ESP32. transport_bt_spp.c só entra com o SPP habilitado.
-set(srcs "obd_transport.c" "transport_replay.c")
+set(srcs "obd_transport.c" "transport_replay.c" "transport_default.c")
 if(CONFIG_OBD_TRANSPORT_BT_SPP)
     list(APPEND srcs "transport_bt_spp.c")
 endif()
