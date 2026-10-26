@@ -3,7 +3,7 @@ menu "OBD transporte"
     config OBD_TRANSPORT_BT_SPP
         bool "Transporte Bluetooth clássico (SPP) para o ELM327"
         default y
-        depends on SOC_BT_CLASSIC_SUPPORTED && BT_CLASSIC_ENABLED
+        depends on SOC_BT_CLASSIC_SUPPORTED && BT_BLUEDROID_ENABLED && BT_CLASSIC_ENABLED && BT_SPP_ENABLED
 
     config OBD_ELM_BT_NAME
         string "Nome Bluetooth do adaptador ELM327"

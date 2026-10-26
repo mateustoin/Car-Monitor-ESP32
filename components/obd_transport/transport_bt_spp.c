@@ -3,7 +3,12 @@
 
    Os callbacks do Bluedroid rodam na task BTC e conversam com connect() por um
    EventGroup. O contexto é estático (instância única): destroy não libera memória,
-   então um callback atrasado nunca toca memória liberada. */
+   então um callback atrasado nunca toca memória liberada.
+
+   Eventos atrasados de uma tentativa anterior (busca, SDP, OPEN/CLOSE) não podem
+   derrubar a tentativa atual: cada etapa só vale com o flag "pendente" da tentativa
+   atual (inquiry_started, sdp_pending, spp_pending) e OPEN com falha / CLOSE só
+   valem para o handle devolvido pelo CL_INIT desta tentativa. */
 #include <inttypes.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -18,13 +23,15 @@
 
 static const char *TAG = "bt_spp";
 
-#define RX_BUF_SIZE        1024
-#define MAX_UNNAMED        8      /* aparelhos sem nome no EIR, para ler o nome depois */
-#define INQ_UNIT_MS        1280   /* unidade do inq_len da busca GAP */
-#define INQ_LEN_MAX        8      /* 8 x 1,28 s ~ 10 s */
-#define SPP_INIT_WAIT_MS   2000
-#define CLOSE_WAIT_MS      1000
-#define CONG_WAIT_MS       1000
+#define RX_BUF_SIZE         1024
+#define INQ_UNIT_MS         1280   /* unidade do inq_len da busca GAP */
+#define INQ_LEN_MAX         8      /* 8 x 1,28 s ~ 10 s */
+#define CONNECT_HEADROOM_MS 6000   /* nomes remotos + SDP + page + pareamento depois da busca */
+#define DIRECT_MAX_FAILS    3      /* falhas seguidas no MAC lembrado antes de voltar à busca */
+#define SPP_INIT_WAIT_MS    2000
+#define INQ_STOP_WAIT_MS    1500
+#define CLOSE_WAIT_MS       1000
+#define CONG_WAIT_MS        1000
 
 #define BIT_FOUND     BIT0
 #define BIT_CONNECTED BIT1
@@ -32,6 +39,7 @@ static const char *TAG = "bt_spp";
 #define BIT_CLOSED    BIT3
 #define BIT_UNCONG    BIT4
 #define BIT_SPP_INIT  BIT5
+#define BIT_INQ_DONE  BIT6
 
 #define BDA_FMT "%02x:%02x:%02x:%02x:%02x:%02x"
 #define BDA_ARG(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
@@ -45,64 +53,45 @@ typedef struct {
     bool has_mac;
     esp_bd_addr_t mac;
 
-    volatile bool connecting;     /* connect() esperando: só então os eventos de busca valem */
+    portMUX_TYPE lock;            /* connecting/connected entre connect() e o OPEN (2 núcleos) */
+    volatile bool connecting;     /* connect() esperando: só então os eventos valem */
     volatile bool connected;
     volatile bool congested;
     volatile uint32_t handle;
+    /* Etapas pendentes da tentativa atual (zeradas no início de cada connect). */
+    volatile bool inquiry_started, sdp_pending, spp_pending, attempt_valid;
+    volatile uint32_t attempt_handle;
     esp_bd_addr_t target;         /* aparelho escolhido para a descoberta SPP */
     esp_bd_addr_t peer;
     bool has_peer;
-
-    esp_bd_addr_t unnamed[MAX_UNNAMED];
-    uint8_t unnamed_count, unnamed_next;
+    esp_bd_addr_t known;          /* último adaptador achado/conectado: conexão direta */
+    bool has_known;
+    uint8_t direct_fails;
 
     EventGroupHandle_t events;
     StreamBufferHandle_t rx;
 } bt_spp_t;
 
-static bt_spp_t s_bt;
-static bool s_stack_ready;
+static bt_spp_t s_bt = {.lock = portMUX_INITIALIZER_UNLOCKED};
 static StaticEventGroup_t s_events_buf;
 static StaticStreamBuffer_t s_rx_struct;
 static uint8_t s_rx_storage[RX_BUF_SIZE + 1];
 
 /* ---------- busca do adaptador (task BTC) ---------- */
 
-static bool name_matches(const uint8_t *name, size_t len)
-{
-    return len == strlen(s_bt.name) && memcmp(name, s_bt.name, len) == 0;
-}
-
-static void target_found(const esp_bd_addr_t bda)
+static void start_sdp(const esp_bd_addr_t bda)
 {
     memcpy(s_bt.target, bda, sizeof(esp_bd_addr_t));
     xEventGroupSetBits(s_bt.events, BIT_FOUND);
-    ESP_LOGI(TAG, "adaptador \"%s\" encontrado em " BDA_FMT, s_bt.name, BDA_ARG(bda));
+    s_bt.sdp_pending = true;
     if (esp_spp_start_discovery(s_bt.target) != ESP_OK) {
+        s_bt.sdp_pending = false;
         xEventGroupSetBits(s_bt.events, BIT_FAILED);
     }
 }
 
-/* Lê o nome remoto do próximo aparelho sem nome; sem mais candidatos, falha. */
-static void read_next_unnamed(void)
-{
-    while (s_bt.unnamed_next < s_bt.unnamed_count) {
-        if (esp_bt_gap_read_remote_name(s_bt.unnamed[s_bt.unnamed_next++]) == ESP_OK) return;
-    }
-    ESP_LOGW(TAG, "adaptador \"%s\" não encontrado na busca", s_bt.name);
-    xEventGroupSetBits(s_bt.events, BIT_FAILED);
-}
-
-static void remember_unnamed(const esp_bd_addr_t bda)
-{
-    for (uint8_t i = 0; i < s_bt.unnamed_count; i++) {
-        if (memcmp(s_bt.unnamed[i], bda, sizeof(esp_bd_addr_t)) == 0) return;
-    }
-    if (s_bt.unnamed_count < MAX_UNNAMED) {
-        memcpy(s_bt.unnamed[s_bt.unnamed_count++], bda, sizeof(esp_bd_addr_t));
-    }
-}
-
+/* O Bluedroid já lê o nome remoto dos aparelhos sem EIR antes de encerrar a busca e
+   o entrega como ESP_BT_GAP_DEV_PROP_BDNAME num novo DISC_RES. */
 static void on_disc_res(const struct disc_res_param *res)
 {
     const uint8_t *name = NULL;
@@ -117,13 +106,15 @@ static void on_disc_res(const struct disc_res_param *res)
             len = (uint8_t)strnlen((const char *)p->val, (size_t)p->len);
         }
     }
-    ESP_LOGI(TAG, "visto " BDA_FMT " nome \"%.*s\"", BDA_ARG(res->bda), name ? len : 0,
-             name ? (const char *)name : "");
-    if (!name) {
-        remember_unnamed(res->bda);
-    } else if (name_matches(name, len)) {
+    if (!name) return;
+    ESP_LOGI(TAG, "visto " BDA_FMT " nome \"%.*s\"", BDA_ARG(res->bda), len, (const char *)name);
+    if (len == strlen(s_bt.name) && memcmp(name, s_bt.name, len) == 0) {
+        ESP_LOGI(TAG, "adaptador \"%s\" encontrado em " BDA_FMT, s_bt.name, BDA_ARG(res->bda));
+        memcpy(s_bt.known, res->bda, sizeof(esp_bd_addr_t));
+        s_bt.has_known = true;
+        s_bt.direct_fails = 0;
         esp_bt_gap_cancel_discovery();
-        target_found(res->bda);
+        start_sdp(res->bda);
     }
 }
 
@@ -132,20 +123,18 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
     bool searching = s_bt.connecting && !(xEventGroupGetBits(s_bt.events) & BIT_FOUND);
     switch (event) {
     case ESP_BT_GAP_DISC_RES_EVT:
-        if (searching) on_disc_res(&param->disc_res);
+        if (searching && s_bt.inquiry_started) on_disc_res(&param->disc_res);
         break;
     case ESP_BT_GAP_DISC_STATE_CHANGED_EVT:
-        /* Busca terminou sem achar pelo EIR: tenta o nome remoto dos sem nome. */
-        if (searching && param->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STOPPED) read_next_unnamed();
-        break;
-    case ESP_BT_GAP_READ_REMOTE_NAME_EVT:
-        if (!searching) break;
-        if (param->read_rmt_name.stat == ESP_BT_STATUS_SUCCESS &&
-            name_matches(param->read_rmt_name.rmt_name,
-                         strlen((const char *)param->read_rmt_name.rmt_name))) {
-            target_found(param->read_rmt_name.bda);
-        } else {
-            read_next_unnamed();
+        if (param->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STARTED) {
+            if (s_bt.connecting) s_bt.inquiry_started = true;
+            break;
+        }
+        xEventGroupSetBits(s_bt.events, BIT_INQ_DONE);
+        /* Só o fim da busca desta tentativa conta; um STOPPED atrasado chega antes do STARTED. */
+        if (searching && s_bt.inquiry_started) {
+            ESP_LOGW(TAG, "adaptador \"%s\" não encontrado na busca", s_bt.name);
+            xEventGroupSetBits(s_bt.events, BIT_FAILED);
         }
         break;
     case ESP_BT_GAP_PIN_REQ_EVT:
@@ -171,6 +160,43 @@ static void gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 
 /* ---------- SPP (task BTC) ---------- */
 
+static bool is_attempt_handle(uint32_t handle)
+{
+    return s_bt.connecting && s_bt.attempt_valid && handle == s_bt.attempt_handle;
+}
+
+static void on_open(const struct spp_open_evt_param *open)
+{
+    if (open->status != ESP_SPP_SUCCESS) {
+        ESP_LOGE(TAG, "SPP open falhou, status %d", open->status);
+        if (is_attempt_handle(open->handle)) xEventGroupSetBits(s_bt.events, BIT_FAILED);
+        return;
+    }
+    size_t was = xStreamBufferBytesAvailable(s_bt.rx);
+    if (xStreamBufferReset(s_bt.rx) != pdPASS) {
+        ESP_LOGW(TAG, "não consegui zerar o buffer de recepção (%u bytes velhos)", (unsigned)was);
+    }
+    bool accept;
+    taskENTER_CRITICAL(&s_bt.lock);
+    accept = s_bt.connecting;
+    if (accept) {
+        s_bt.handle = open->handle;
+        s_bt.congested = false;
+        s_bt.connected = true;
+    }
+    taskEXIT_CRITICAL(&s_bt.lock);
+    if (!accept) {   /* chegou depois do timeout do connect(): descarta */
+        esp_spp_disconnect(open->handle);
+        return;
+    }
+    memcpy(s_bt.peer, open->rem_bda, sizeof(esp_bd_addr_t));
+    s_bt.has_peer = true;
+    memcpy(s_bt.known, open->rem_bda, sizeof(esp_bd_addr_t));
+    s_bt.has_known = true;
+    ESP_LOGI(TAG, "connected " BDA_FMT " handle %" PRIu32, BDA_ARG(s_bt.peer), s_bt.handle);
+    xEventGroupSetBits(s_bt.events, BIT_CONNECTED);
+}
+
 static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 {
     switch (event) {
@@ -179,46 +205,45 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
         else ESP_LOGE(TAG, "SPP init falhou, status %d", param->init.status);
         break;
     case ESP_SPP_DISCOVERY_COMP_EVT:
-        if (!s_bt.connecting) break;
+        if (!s_bt.connecting || !s_bt.sdp_pending) break;
+        s_bt.sdp_pending = false;
         if (param->disc_comp.status == ESP_SPP_SUCCESS && param->disc_comp.scn_num > 0) {
-            esp_spp_connect(ESP_SPP_SEC_AUTHENTICATE, ESP_SPP_ROLE_MASTER, param->disc_comp.scn[0],
-                            s_bt.target);
+            s_bt.spp_pending = true;
+            if (esp_spp_connect(ESP_SPP_SEC_AUTHENTICATE, ESP_SPP_ROLE_MASTER, param->disc_comp.scn[0],
+                                s_bt.target) != ESP_OK) {
+                s_bt.spp_pending = false;
+                xEventGroupSetBits(s_bt.events, BIT_FAILED);
+            }
         } else {
             ESP_LOGE(TAG, "serviço SPP não encontrado, status %d", param->disc_comp.status);
             xEventGroupSetBits(s_bt.events, BIT_FAILED);
         }
         break;
     case ESP_SPP_CL_INIT_EVT:
-        if (param->cl_init.status != ESP_SPP_SUCCESS && s_bt.connecting) {
+        if (!s_bt.connecting || !s_bt.spp_pending) break;
+        s_bt.spp_pending = false;
+        if (param->cl_init.status == ESP_SPP_SUCCESS) {
+            s_bt.attempt_handle = param->cl_init.handle;
+            s_bt.attempt_valid = true;
+        } else {
             ESP_LOGE(TAG, "SPP connect falhou, status %d", param->cl_init.status);
             xEventGroupSetBits(s_bt.events, BIT_FAILED);
         }
         break;
     case ESP_SPP_OPEN_EVT:
-        if (param->open.status != ESP_SPP_SUCCESS) {
-            ESP_LOGE(TAG, "SPP open falhou, status %d", param->open.status);
-            xEventGroupSetBits(s_bt.events, BIT_FAILED);
-            break;
-        }
-        if (!s_bt.connecting) {   /* chegou depois do timeout do connect(): descarta */
-            esp_spp_disconnect(param->open.handle);
-            break;
-        }
-        xStreamBufferReset(s_bt.rx);
-        s_bt.handle = param->open.handle;
-        memcpy(s_bt.peer, param->open.rem_bda, sizeof(esp_bd_addr_t));
-        s_bt.has_peer = true;
-        s_bt.congested = false;
-        s_bt.connected = true;
-        ESP_LOGI(TAG, "connected " BDA_FMT " handle %" PRIu32, BDA_ARG(s_bt.peer), s_bt.handle);
-        xEventGroupSetBits(s_bt.events, BIT_CONNECTED);
+        on_open(&param->open);
         break;
     case ESP_SPP_CLOSE_EVT:
-        if (s_bt.connected && param->close.handle != s_bt.handle) break;
-        ESP_LOGW(TAG, "desconectado (handle %" PRIu32 ", pelo remoto: %d)", param->close.handle,
-                 param->close.async);
-        s_bt.connected = false;
-        xEventGroupSetBits(s_bt.events, BIT_CLOSED | BIT_UNCONG);
+        if (s_bt.connected && param->close.handle == s_bt.handle) {
+            ESP_LOGW(TAG, "desconectado (handle %" PRIu32 ", pelo remoto: %d)", param->close.handle,
+                     param->close.async);
+            s_bt.connected = false;
+            xEventGroupSetBits(s_bt.events, BIT_CLOSED | BIT_UNCONG);
+        } else if (is_attempt_handle(param->close.handle)) {
+            /* No modo CB, falha de page/pareamento chega como CLOSE do handle da tentativa. */
+            ESP_LOGW(TAG, "conexão recusada (handle %" PRIu32 ")", param->close.handle);
+            xEventGroupSetBits(s_bt.events, BIT_FAILED);
+        }
         break;
     case ESP_SPP_DATA_IND_EVT: {
         size_t sent = xStreamBufferSend(s_bt.rx, param->data_ind.data, param->data_ind.len, 0);
@@ -241,16 +266,21 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
     }
 }
 
-/* ---------- pilha BT (uma vez) ---------- */
+/* ---------- pilha BT (uma vez; retomável depois de falha parcial) ---------- */
 
 #define TRY(x) do { esp_err_t e_ = (x); if (e_ != ESP_OK) { \
     ESP_LOGE(TAG, "%s: %s", #x, esp_err_to_name(e_)); return e_; } } while (0)
 
 static esp_err_t stack_init(void)
 {
-    if (s_stack_ready) return ESP_OK;
+    /* Etapas concluídas ficam marcadas: um create depois de uma falha retoma de onde parou. */
+    static bool ble_released, callbacks_ready, spp_init_issued, ready;
+    if (ready) return ESP_OK;
     if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
-        TRY(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
+        if (!ble_released) {
+            TRY(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
+            ble_released = true;
+        }
         esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
         TRY(esp_bt_controller_init(&bt_cfg));
     }
@@ -263,20 +293,26 @@ static esp_err_t stack_init(void)
     }
     if (esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_ENABLED) TRY(esp_bluedroid_enable());
 
-    TRY(esp_bt_gap_register_callback(gap_cb));
-    /* Sem tela/teclado no pareamento: SSP vira "just works". */
-    esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
-    TRY(esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &iocap, sizeof(iocap)));
-    TRY(esp_spp_register_callback(spp_cb));
-    /* ERTM desligado: o modo básico do L2CAP é o que os clones do ELM327 aceitam. */
-    esp_spp_cfg_t spp_cfg = {.mode = ESP_SPP_MODE_CB, .enable_l2cap_ertm = false, .tx_buffer_size = 0};
-    TRY(esp_spp_enhanced_init(&spp_cfg));
+    if (!callbacks_ready) {
+        TRY(esp_bt_gap_register_callback(gap_cb));
+        /* Sem tela/teclado no pareamento: SSP vira "just works". */
+        esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
+        TRY(esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &iocap, sizeof(iocap)));
+        TRY(esp_spp_register_callback(spp_cb));
+        callbacks_ready = true;
+    }
+    if (!spp_init_issued) {
+        /* ERTM desligado: o modo básico do L2CAP é o que os clones do ELM327 aceitam. */
+        esp_spp_cfg_t spp_cfg = {.mode = ESP_SPP_MODE_CB, .enable_l2cap_ertm = false, .tx_buffer_size = 0};
+        TRY(esp_spp_enhanced_init(&spp_cfg));
+        spp_init_issued = true;
+    }
     if (!(xEventGroupWaitBits(s_bt.events, BIT_SPP_INIT, pdFALSE, pdFALSE,
                               pdMS_TO_TICKS(SPP_INIT_WAIT_MS)) & BIT_SPP_INIT)) {
         ESP_LOGE(TAG, "SPP não inicializou");
         return ESP_ERR_TIMEOUT;
     }
-    s_stack_ready = true;
+    ready = true;
     return ESP_OK;
 }
 
@@ -293,35 +329,50 @@ static esp_err_t bt_connect(obd_transport_t *t, uint32_t timeout_ms)
     (void)t;
     if (s_bt.connected) return ESP_OK;
     TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
-    xEventGroupClearBits(s_bt.events, BIT_FOUND | BIT_CONNECTED | BIT_FAILED | BIT_CLOSED);
-    s_bt.unnamed_count = s_bt.unnamed_next = 0;
+    xEventGroupClearBits(s_bt.events, BIT_FOUND | BIT_CONNECTED | BIT_FAILED | BIT_CLOSED | BIT_INQ_DONE);
+    s_bt.inquiry_started = s_bt.sdp_pending = s_bt.spp_pending = s_bt.attempt_valid = false;
     s_bt.connecting = true;
 
-    esp_err_t err;
-    if (s_bt.has_mac) {
-        memcpy(s_bt.target, s_bt.mac, sizeof(esp_bd_addr_t));
-        xEventGroupSetBits(s_bt.events, BIT_FOUND);
-        err = esp_spp_start_discovery(s_bt.target);
+    /* MAC da config, ou o último adaptador achado enquanto o direto não falhar demais. */
+    bool direct = s_bt.has_mac || (s_bt.has_known && s_bt.direct_fails < DIRECT_MAX_FAILS);
+    bool inquiry = false;
+    esp_err_t err = ESP_OK;
+    if (direct) {
+        const uint8_t *mac = s_bt.has_mac ? s_bt.mac : s_bt.known;
+        ESP_LOGI(TAG, "conectando direto em " BDA_FMT, BDA_ARG(mac));
+        start_sdp(mac);
     } else {
-        uint32_t inq = timeout_ms / INQ_UNIT_MS;
+        uint32_t inq = timeout_ms > CONNECT_HEADROOM_MS ? (timeout_ms - CONNECT_HEADROOM_MS) / INQ_UNIT_MS : 0;
         if (inq < 1) inq = 1;
         if (inq > INQ_LEN_MAX) inq = INQ_LEN_MAX;
         ESP_LOGI(TAG, "procurando \"%s\" (%" PRIu32 " x 1,28 s)", s_bt.name, inq);
         err = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, (uint8_t)inq, 0);
+        inquiry = err == ESP_OK;
     }
     if (err == ESP_OK) {
-        EventBits_t bits = xEventGroupWaitBits(s_bt.events, BIT_CONNECTED | BIT_FAILED | BIT_CLOSED,
+        EventBits_t bits = xEventGroupWaitBits(s_bt.events, BIT_CONNECTED | BIT_FAILED,
                                                pdFALSE, pdFALSE, ticks_left(deadline));
         if (bits & BIT_CONNECTED) err = ESP_OK;
-        else if (bits & (BIT_FAILED | BIT_CLOSED)) err = ESP_FAIL;
+        else if (bits & BIT_FAILED) err = ESP_FAIL;
         else err = ESP_ERR_TIMEOUT;
     }
+
+    bool ok;
+    taskENTER_CRITICAL(&s_bt.lock);
     s_bt.connecting = false;
-    if (s_bt.connected) err = ESP_OK;   /* OPEN chegou entre o fim da espera e a linha acima */
-    if (err != ESP_OK) {
-        esp_bt_gap_cancel_discovery();
-        ESP_LOGW(TAG, "connect falhou: %s", esp_err_to_name(err));
+    ok = s_bt.connected;          /* OPEN pode ter chegado entre o fim da espera e aqui */
+    taskEXIT_CRITICAL(&s_bt.lock);
+    if (ok) {
+        if (!s_bt.has_mac) s_bt.direct_fails = 0;
+        return ESP_OK;
     }
+    if (direct && !s_bt.has_mac && s_bt.direct_fails < DIRECT_MAX_FAILS) s_bt.direct_fails++;
+    /* Encerra a busca antes de voltar, para o STOPPED dela não cair na próxima tentativa. */
+    if (inquiry && !(xEventGroupGetBits(s_bt.events) & BIT_INQ_DONE)) {
+        esp_bt_gap_cancel_discovery();
+        xEventGroupWaitBits(s_bt.events, BIT_INQ_DONE, pdFALSE, pdFALSE, pdMS_TO_TICKS(INQ_STOP_WAIT_MS));
+    }
+    ESP_LOGW(TAG, "connect falhou: %s", esp_err_to_name(err));
     return err;
 }
 
@@ -407,6 +458,8 @@ esp_err_t transport_bt_spp_create(const transport_bt_spp_config_t *cfg, obd_tran
     else TRY(esp_bt_gap_set_pin(ESP_BT_PIN_TYPE_VARIABLE, 0, s_bt.pin));
 
     s_bt.connected = false;
+    s_bt.has_known = false;
+    s_bt.direct_fails = 0;
     s_bt.base.ops = &bt_ops;
     s_bt.base.ctx = &s_bt;
     s_bt.in_use = true;
