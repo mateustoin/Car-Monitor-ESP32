@@ -19,6 +19,7 @@ static char *read_file(const char *path)
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long n = ftell(f);
+    if (n < 0) { fclose(f); return NULL; }
     fseek(f, 0, SEEK_SET);
     char *buf = malloc((size_t)n + 1);
     if (buf && fread(buf, 1, (size_t)n, f) != (size_t)n) { free(buf); buf = NULL; }
@@ -57,7 +58,13 @@ int main(int argc, char **argv)
         char *copy = strdup(seeds_arg), *save = NULL;
         for (char *tok = strtok_r(copy, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
             if (n >= VP_MAX_GEARS) { n++; break; }
-            seeds[n++] = strtof(tok, NULL);
+            char *end;
+            seeds[n] = strtof(tok, &end);
+            if (end == tok || *end != '\0') {
+                fprintf(stderr, "--seeds: valor inválido \"%s\"\n", tok);
+                return 2;
+            }
+            n++;
         }
         free(copy);
         if (n != prof->gears) {
@@ -82,6 +89,7 @@ int main(int argc, char **argv)
 
     printf("t_ms,rpm,speed,load,gear,advice,target,learning\n");
     int no_data = 0;
+    uint32_t prev_now = 0, last_rpm_t = UINT32_MAX, last_spd_t = UINT32_MAX;
     while (!transport_replay_eof(t) && no_data < MAX_NO_DATA) {
         uint32_t now = transport_replay_now_ms(t);
         uint8_t pid = obd_poller_next(&poller, now);
@@ -89,11 +97,18 @@ int main(int argc, char **argv)
         float v = 0;
         esp_err_t err = elm327_read_pid(&elm, pid, &v);
         now = transport_replay_now_ms(t);
+        if (now - prev_now > prof->stale_ms)
+            fprintf(stderr, "aviso: relógio saltou %u ms (registros pulados na gravação?) em t=%u\n",
+                    (unsigned)(now - prev_now), (unsigned)now);
+        prev_now = now;
         no_data = (err == ESP_ERR_NOT_FOUND) ? no_data + 1 : 0;
         obd_poller_record(&poller, pid, v, err == ESP_OK, now);
 
         const obd_snapshot_t *s = obd_poller_snapshot(&poller);
         if (!s->rpm.valid || !s->speed_kmh.valid) continue;
+        if (s->rpm.t_ms == last_rpm_t && s->speed_kmh.t_ms == last_spd_t) continue;
+        last_rpm_t = s->rpm.t_ms;
+        last_spd_t = s->speed_kmh.t_ms;
         gear_input_t in = {
             .now_ms = now,
             .sample_ms = s->rpm.t_ms < s->speed_kmh.t_ms ? s->rpm.t_ms : s->speed_kmh.t_ms,

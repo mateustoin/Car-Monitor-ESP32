@@ -2,7 +2,7 @@
 """Gera sample.tsv: viagem sintética de ~30 s (2a -> 3a -> 4a) para o replay.
 Uso: python3 gen_sample.py > sample.tsv"""
 RATIOS = {2: 13.6, 3: 20.0, 4: 27.1}   # km/h por 1000 RPM (perfil sandero_k7m)
-SUPPORTED = (0x04, 0x05, 0x0C, 0x0D, 0x11)
+SUPPORTED = (0x04, 0x0C, 0x0D, 0x11)
 mask = 0
 for pid in SUPPORTED:
     mask |= 1 << (32 - pid)
@@ -26,7 +26,6 @@ def emit(t, rpm, speed, load):
 
 STEP = 400
 t = 1000
-n = 0
 for gear in (2, 3, 4):
     ratio = RATIOS[gear]
     start = 1800 if gear == 2 else (RATIOS[gear - 1] * 2400 / ratio)
@@ -34,9 +33,6 @@ for gear in (2, 3, 4):
     for i in range(steps + 1):
         rpm = start + (2400 - start) * i / steps
         emit(t, rpm, ratio * rpm / 1000, 15)
-        if n % 5 == 4:
-            rec(t + 160, "0105", "4105" + f"{85 + 40:02X}")
-        n += 1
         t += STEP
     if gear < 4:   # embreagem: RPM cai sem mudar a velocidade
         emit(t, 1100, ratio * 2400 / 1000, 5)
