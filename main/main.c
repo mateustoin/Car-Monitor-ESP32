@@ -2,9 +2,11 @@
    com uma marcha falsa a cada 2 s, toca os tons de subir e reduzir e loga os botões. */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_console.h"
 #include "esp_log.h"
 #include "board_api.h"
 #include "ui.h"
+#include "obd_recorder.h"
 
 static const char *TAG = "car_monitor";
 
@@ -23,6 +25,24 @@ static void play_tone(bool up)
     board_buzzer_tone(up ? 2600 : 1600, 90);
 }
 
+/* Console na UART0 com o comando "rec" (gravação da viagem; ver obd_recorder). */
+static void start_console(void)
+{
+    esp_err_t err = rec_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "gravador indisponível: %s", esp_err_to_name(err));
+        return;
+    }
+    esp_console_repl_t *repl = NULL;
+    esp_console_repl_config_t repl_cfg = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+    repl_cfg.prompt = "carmon> ";
+    esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+    err = esp_console_new_repl_uart(&uart_cfg, &repl_cfg, &repl);
+    if (err == ESP_OK) err = rec_console_register();
+    if (err == ESP_OK) err = esp_console_start_repl(repl);
+    if (err != ESP_OK) ESP_LOGW(TAG, "console indisponível: %s", esp_err_to_name(err));
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "car_monitor: demo de hardware");
@@ -30,6 +50,8 @@ void app_main(void)
     ESP_ERROR_CHECK(ui_init(board_display()));
     esp_err_t err = board_buttons_register(on_button, NULL);
     if (err != ESP_OK) ESP_LOGW(TAG, "botões indisponíveis: %s", esp_err_to_name(err));
+
+    start_console();
 
     static const struct { gear_state_t s; bool connected; const char *name; } steps[] = {
         {{.gear = 3, .advice = SHIFT_NONE, .learned_gears = 5}, true, "OK"},

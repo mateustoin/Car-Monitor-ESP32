@@ -41,3 +41,13 @@ bool rec_parse_line(const char *line, uint32_t *t_ms, char *cmd, size_t cmd_cap,
     *t_ms = (uint32_t)ts;
     return true;
 }
+
+int rec_trip_index(const char *name)
+{
+    if (!name || strncmp(name, "trip_", 5) != 0) return -1;
+    const char *p = name + 5;
+    int n = 0, digits = 0;
+    while (*p >= '0' && *p <= '9' && digits < 6) { n = n * 10 + (*p - '0'); p++; digits++; }
+    if (digits == 0 || strcmp(p, ".tsv") != 0) return -1;
+    return n;
+}

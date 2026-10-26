@@ -1,0 +1,6 @@
+dependencies:
+  # Fora do alvo linux: os testes no host (test/host) varrem components/ e não gravam em flash.
+  joltwallet/littlefs:
+    version: "~=1.21.0"
+    rules:
+      - if: "target != linux"
